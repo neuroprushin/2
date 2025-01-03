@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.A.R.V.I.S.</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    
+    <!-- External CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/scroll/simplescrollbars.min.css" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link href="/static/styles.css" rel="stylesheet">
+</head>
+<body class="min-h-screen">
+    <div class="container mx-auto px-6 py-8">
+        <!-- Header -->
+        <div class="flex flex-col items-center mb-12 slide-up">
+            <img src="/logo.svg" alt="J.A.R.V.I.S. Logo" width="140" height="140" class="mb-6 hover:scale-105 transition-transform">
+            <h1 class="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-blue-700">J.A.R.V.I.S.</h1>
+        </div>
+        
+        <div class="grid grid-cols-12 gap-8">
+            <!-- Workspace Panel -->
+            <div class="col-span-3">
+                <!-- Current Workspace -->
+                <div class="panel p-6 mb-6 fade-in">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-xl font-bold flex items-center gap-2">
+                            <i class="fas fa-folder text-blue-500"></i>
+                            Workspace
+                        </h2>
+                        <button onclick="createWorkspace()" class="btn btn-primary">
+                            <i class="fas fa-plus"></i>
+                            New
+                        </button>
+                    </div>
+                    <div id="currentWorkspaceInfo" class="mb-4 text-sm text-gray-400 hidden">
+                        <p>Current workspace:</p>
+                        <p id="currentWorkspaceName" class="truncate font-medium text-white"></p>
+                    </div>
+                    <div id="workspaceTree" class="file-tree"></div>
+                </div>
+
+                <!-- Workspace History -->
+                <div class="panel p-6 mb-6 fade-in">
+                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+                        <i class="fas fa-history text-blue-500"></i>
+                        History
+                    </h2>
+                    <div id="workspaceHistory" class="space-y-3 max-h-[300px] overflow-y-auto"></div>
+                </div>
+
+                <!-- Model Selection -->
+                <div class="panel p-6 fade-in">
+                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+                        <i class="fas fa-robot text-blue-500"></i>
+                        AI Model
+                    </h2>
+                    <select id="modelSelect" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 transition-all">
+                        <option value="deepseek">DeepSeek V3</option>
+                        <option value="grok">Grok 2</option>
+                        <option value="qwen">Qwen 2.5 Coder</option>
+                        <option value="claude">Claude 3.5 Sonnet</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="col-span-9">
+                <!-- Mode Selection -->
+                <div class="flex gap-4 mb-6 fade-in">
+                    <button class="btn btn-secondary mode-button active" onclick="setMode('code')">
+                        <i class="fas fa-code"></i>
+                        Code Generation
+                    </button>
+                    <button class="btn btn-secondary mode-button" onclick="setMode('chat')">
+                        <i class="fas fa-comments"></i>
+                        Chat
+                    </button>
+                </div>
+
+                <!-- Code Generation Mode -->
+                <div id="codeMode" class="panel p-6 fade-in">
+                    <div class="flex flex-col gap-4">
+                        <textarea id="promptInput" rows="4" 
+                            class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 transition-all"
+                            placeholder="Describe what you want to create or modify..."></textarea>
+                        <div class="flex justify-end">
+                            <button onclick="processPrompt()" class="btn btn-primary">
+                                <i class="fas fa-magic"></i>
+                                Send
+                            </button>
+                        </div>
+                    </div>
+                    <div id="codeHistory" class="mt-4 max-h-[60vh] overflow-y-auto"></div>
+                </div>
+
+                <!-- Chat Mode -->
+                <div id="chatMode" class="panel p-6 hidden fade-in">
+                    <div class="flex flex-col gap-4">
+                        <textarea id="chatInput" rows="4" 
+                            class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 transition-all"
+                            placeholder="Describe what you want to create or modify..."></textarea>
+                        <div class="flex justify-end">
+                            <button onclick="sendChatMessage()" class="btn btn-primary">
+                                <i class="fas fa-magic"></i>
+                                Send
+                            </button>
+                        </div>
+                    </div>
+                    <div id="chatHistory" class="mt-4 max-h-[60vh] overflow-y-auto"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Copyright Notice -->
+    <footer class="text-center text-gray-400 py-4 mt-8">
+        <p>Copyright © 2024 Danilo Falcão. All rights reserved.</p>
+    </footer>
+
+    <!-- Modal for file preview and changes approval -->
+    <div id="approvalModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 overflow-y-auto">
+        <div class="min-h-screen px-4 flex items-center justify-center">
+            <div class="bg-gray-800 rounded-lg w-full max-w-6xl my-8 modal-content flex flex-col">
+                <div class="modal-header flex-none">
+                    <h2 class="text-2xl font-bold">Review Changes</h2>
+                </div>
+                <div class="modal-body flex-1 overflow-y-auto" style="max-height: calc(90vh - 140px);">
+                    <div id="changesPreview"></div>
+                </div>
+                <div class="modal-footer flex-none sticky bottom-0 bg-gray-800">
+                    <div class="flex justify-end space-x-4"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+        <div class="bg-gray-800 rounded-lg p-8 flex items-center space-x-4">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+            <span class="text-lg" id="loadingText">Processing...</span>
+        </div>
+    </div>
+
+    <!-- External Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/xml/xml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/css/css.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/scroll/simplescrollbars.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/selection/active-line.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/matchbrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/meta.min.js"></script>
+    
+    <!-- Custom Script -->
+    <script src="/static/script.js"></script>
+</body>
+</html> 
