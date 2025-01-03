@@ -867,7 +867,13 @@ def process_prompt():
         data = request.json
         prompt = data.get('prompt')
         workspace_dir = data.get('workspace_dir')
-        model_id = data.get('model_id', 'deepseek')  # Default to DeepSeek
+        model_id = data.get('model_id', 'deepseek')
+        attachments = data.get('attachments', [])
+        
+        print(f"\nReceived request with {len(attachments)} attachments:")
+        for attachment in attachments:
+            print(f"- Attachment: {attachment['name']}")
+            print(f"  Content length: {len(attachment['content'])} characters")
         
         if not prompt:
             return jsonify({'status': 'error', 'message': 'No prompt provided'}), 400
@@ -884,12 +890,28 @@ def process_prompt():
         files_content = get_existing_files(workspace_dir)
         print(f"Found {len(files_content)} readable files")
         
+        # Add attachment contents to the context
+        attachment_context = ""
+        if attachments:
+            print("\nProcessing attachments for context:")
+            attachment_context = "\nAttached files for context:\n\n"
+            for attachment in attachments:
+                print(f"- Adding {attachment['name']} to context")
+                attachment_context += f"File: {attachment['name']}\nContent:\n{attachment['content']}\n\n"
+        
+        # Combine prompt with attachments
+        full_prompt = f"{prompt}\n\n{attachment_context}" if attachments else prompt
+        print("\nFinal prompt with attachments:")
+        print("---")
+        print(full_prompt)
+        print("---")
+        
         print("Getting workspace context...")
         workspace_context = get_workspace_context(workspace_dir)
         
         print(f"Getting suggestions from AI model: {model_id}")
         # Get suggestions from AI, passing the file contents
-        suggestions = get_code_suggestion(prompt, files_content, workspace_context, model_id)
+        suggestions = get_code_suggestion(full_prompt, files_content, workspace_context, model_id)
         
         print("AI Response:", json.dumps(suggestions, indent=2))
         
@@ -1101,7 +1123,13 @@ def chat():
         data = request.json
         prompt = data.get('prompt')
         workspace_dir = data.get('workspace_dir')
-        model_id = data.get('model_id', 'deepseek')  # Default to DeepSeek
+        model_id = data.get('model_id', 'deepseek')
+        attachments = data.get('attachments', [])
+        
+        print(f"\nReceived chat request with {len(attachments)} attachments:")
+        for attachment in attachments:
+            print(f"- Attachment: {attachment['name']}")
+            print(f"  Content length: {len(attachment['content'])} characters")
         
         if not prompt:
             return jsonify({'error': 'No prompt provided'}), 400
@@ -1110,6 +1138,19 @@ def chat():
             return jsonify({'error': 'Invalid workspace directory'}), 400
         
         workspace_context = get_workspace_context(workspace_dir)
+        
+        # Add attachment contents to the context
+        if attachments:
+            print("\nProcessing attachments for chat context:")
+            workspace_context += "\n\nAttached files:\n\n"
+            for attachment in attachments:
+                print(f"- Adding {attachment['name']} to context")
+                workspace_context += f"File: {attachment['name']}\nContent:\n{attachment['content']}\n\n"
+        
+        print("\nFinal context with attachments:")
+        print("---")
+        print(workspace_context)
+        print("---")
         
         system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss the code in the workspace.
 Current workspace contains the following files:

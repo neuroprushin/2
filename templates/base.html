@@ -18,6 +18,28 @@
     
     <!-- Custom CSS -->
     <link href="{{ url_for('static', filename='styles.css') }}?v={{ cache_buster }}" rel="stylesheet">
+
+    <!-- File Processing Libraries -->
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+    
+    <!-- Mammoth.js for DOCX -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    
+    <!-- Tesseract.js for OCR -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
+    
+    <!-- XLSX.js for Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- Marked for enhanced Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+    
+    <!-- Unified.js ecosystem for advanced text processing -->
+    <script src="https://cdn.jsdelivr.net/npm/unified@11.0.4/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/remark-parse@11.0.0/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/remark-gfm@4.0.0/index.min.js"></script>
 </head>
 <body class="min-h-screen">
     <div class="container mx-auto px-6 py-8">
@@ -90,9 +112,19 @@
                 <!-- Code Generation Mode -->
                 <div id="codeMode" class="panel p-6 fade-in">
                     <div class="flex flex-col gap-4">
-                        <textarea id="promptInput" rows="4" 
-                            class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 transition-all"
-                            placeholder="Describe what you want to create or modify..."></textarea>
+                        <div class="flex items-start gap-4">
+                            <textarea id="promptInput" rows="4" 
+                                class="flex-1 bg-gray-700 border border-gray-600 rounded-lg p-4 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 transition-all"
+                                placeholder="Describe what you want to create or modify..."></textarea>
+                            <div class="flex-none">
+                                <label for="codeAttachment" class="btn btn-secondary cursor-pointer">
+                                    <i class="fas fa-paperclip"></i>
+                                    <span class="sr-only">Attach File</span>
+                                </label>
+                                <input type="file" id="codeAttachment" class="hidden" multiple>
+                            </div>
+                        </div>
+                        <div id="codeAttachments" class="space-y-2"></div>
                         <div class="flex justify-end">
                             <button onclick="processPrompt()" class="btn btn-primary">
                                 <i class="fas fa-magic"></i>
@@ -106,12 +138,22 @@
                 <!-- Chat Mode -->
                 <div id="chatMode" class="panel p-6 hidden fade-in">
                     <div class="flex flex-col gap-4">
-                        <textarea id="chatInput" rows="4" 
-                            class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 transition-all"
-                            placeholder="Describe what you want to create or modify..."></textarea>
+                        <div class="flex items-start gap-4">
+                            <textarea id="chatInput" rows="4" 
+                                class="flex-1 bg-gray-700 border border-gray-600 rounded-lg p-4 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 transition-all"
+                                placeholder="Ask a question about your code..."></textarea>
+                            <div class="flex-none">
+                                <label for="chatAttachment" class="btn btn-secondary cursor-pointer">
+                                    <i class="fas fa-paperclip"></i>
+                                    <span class="sr-only">Attach File</span>
+                                </label>
+                                <input type="file" id="chatAttachment" class="hidden" multiple>
+                            </div>
+                        </div>
+                        <div id="chatAttachments" class="space-y-2"></div>
                         <div class="flex justify-end">
                             <button onclick="sendChatMessage()" class="btn btn-primary">
-                                <i class="fas fa-magic"></i>
+                                <i class="fas fa-paper-plane"></i>
                                 Send
                             </button>
                         </div>
