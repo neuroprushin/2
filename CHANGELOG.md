@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.4] - 2024-01-05
+
+### Added
+- New modern UI design inspired by Cursor IDE:
+  - Bubble-style panels for workspace, chat, and main content
+  - Centered logo and title placement
+  - Improved spacing and layout consistency
+  - Enhanced visual hierarchy
+- Improved chat interface:
+  - Fixed height chat input area
+  - Better message spacing
+  - Cleaner bubble design
+- Enhanced workspace panel:
+  - Centralized workspace controls
+  - Better organized file tree
+  - Improved model selection dropdown
+- Updated copyright notice with special thanks
+
+### Changed
+- Adjusted panel widths for better usability
+- Improved spacing between elements
+- Enhanced button styles and hover effects
+- Refined color scheme and borders
+- Reorganized layout structure for better visual flow
+
 ## [0.0.3] - 2024-01-04
 
 ### Added

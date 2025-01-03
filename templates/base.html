@@ -41,52 +41,47 @@
     <script src="https://cdn.jsdelivr.net/npm/remark-parse@11.0.0/index.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/remark-gfm@4.0.0/index.min.js"></script>
 </head>
-<body class="min-h-screen">
-    <div class="container mx-auto px-6 py-8">
-        <!-- Header -->
-        <div class="flex flex-col items-center mb-12 slide-up">
-            <img src="/logo.svg" alt="J.A.R.V.I.S. Logo" width="140" height="140" class="mb-6 hover:scale-105 transition-transform">
-            <h1 class="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-blue-700">J.A.R.V.I.S.</h1>
-        </div>
-        
-        <div class="grid grid-cols-12 gap-8">
-            <!-- Workspace Panel -->
-            <div class="col-span-3">
-                <!-- Current Workspace -->
-                <div class="panel p-6 mb-6 fade-in">
-                    <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-xl font-bold flex items-center gap-2">
-                            <i class="fas fa-folder text-blue-500"></i>
-                            Workspace
-                        </h2>
-                        <button onclick="createWorkspace()" class="btn btn-primary">
-                            <i class="fas fa-plus"></i>
-                            New
-                        </button>
-                    </div>
-                    <div id="currentWorkspaceInfo" class="mb-4 text-sm text-gray-400 hidden">
-                        <p>Current workspace:</p>
-                        <p id="currentWorkspaceName" class="truncate font-medium text-white"></p>
-                    </div>
-                    <div id="workspaceTree" class="file-tree"></div>
-                </div>
-
-                <!-- Workspace History -->
-                <div class="panel p-6 mb-6 fade-in">
-                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
-                        <i class="fas fa-history text-blue-500"></i>
-                        History
+<body class="min-h-screen bg-[#1e1e1e]">
+    <div class="flex h-screen">
+        <!-- Left Sidebar - Workspace Panel -->
+        <div class="workspace-panel w-[352px] flex-none overflow-y-auto">
+            <!-- Current Workspace -->
+            <div class="panel p-4 m-2">
+                <div class="flex flex-col items-center mb-3">
+                    <h2 class="text-base font-bold flex items-center gap-2 mb-2">
+                        <i class="fas fa-folder text-blue-500"></i>
+                        Workspace
                     </h2>
-                    <div id="workspaceHistory" class="space-y-3 max-h-[300px] overflow-y-auto"></div>
+                    <button onclick="createWorkspace()" class="btn btn-primary btn-sm">
+                        <i class="fas fa-plus"></i>
+                    </button>
                 </div>
+                <div id="currentWorkspaceInfo" class="mb-2 text-sm text-gray-400 hidden text-center">
+                    <p>Current Workspace:</p>
+                    <p id="currentWorkspaceName" class="truncate font-medium text-white"></p>
+                </div>
+                <div id="workspaceTree" class="file-tree max-h-[200px] overflow-y-auto"></div>
+            </div>
 
-                <!-- Model Selection -->
-                <div class="panel p-6 fade-in">
-                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+            <!-- Workspace History -->
+            <div class="panel p-4 m-2">
+                <div class="flex flex-col items-center">
+                    <h2 class="text-base font-bold mb-2 flex items-center gap-2">
+                        <i class="fas fa-history text-blue-500"></i>
+                        Workspace History
+                    </h2>
+                    <div id="workspaceHistory" class="space-y-2 max-h-[150px] overflow-y-auto w-full"></div>
+                </div>
+            </div>
+
+            <!-- Model Selection -->
+            <div class="panel p-4 m-2">
+                <div class="flex flex-col items-center">
+                    <h2 class="text-base font-bold mb-2 flex items-center gap-2">
                         <i class="fas fa-robot text-blue-500"></i>
                         AI Model
                     </h2>
-                    <select id="modelSelect" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 transition-all">
+                    <select id="modelSelect" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-sm text-center">
                         <option value="deepseek">DeepSeek V3</option>
                         <option value="grok">Grok 2</option>
                         <option value="qwen">Qwen 2.5 Coder</option>
@@ -94,80 +89,89 @@
                     </select>
                 </div>
             </div>
+        </div>
 
-            <!-- Main Content Area -->
-            <div class="col-span-9">
-                <!-- Mode Selection -->
-                <div class="flex gap-4 mb-6 fade-in">
-                    <button class="btn btn-secondary mode-button active" onclick="setMode('code')">
-                        <i class="fas fa-code"></i>
-                        Code Generation
-                    </button>
-                    <button class="btn btn-secondary mode-button" onclick="setMode('chat')">
-                        <i class="fas fa-comments"></i>
-                        Chat
-                    </button>
+        <!-- Main Content Area -->
+        <div class="flex-1 flex flex-col p-2">
+            <!-- Main Content Bubble -->
+            <div class="panel flex-1 flex flex-col">
+                <!-- Logo and Title -->
+                <div class="p-4 flex flex-col items-center border-b border-[#3e3e42]">
+                    <img src="/logo.svg" alt="J.A.R.V.I.S. Logo" width="78" height="78" class="mb-2">
+                    <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-blue-700">J.A.R.V.I.S.</h1>
                 </div>
 
-                <!-- Code Generation Mode -->
-                <div id="codeMode" class="panel p-6 fade-in">
-                    <div class="flex flex-col gap-4">
-                        <div class="flex items-start gap-4">
-                            <textarea id="promptInput" rows="4" 
-                                class="flex-1 bg-gray-700 border border-gray-600 rounded-lg p-4 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 transition-all"
+                <!-- Code History -->
+                <div id="codeHistory" class="flex-1 overflow-y-auto p-4"></div>
+
+                <!-- Code Generation Area - Bottom -->
+                <div class="p-4 border-t border-[#3e3e42]">
+                    <h2 class="text-center text-sm font-semibold text-gray-400 uppercase mb-2 flex items-center justify-center gap-2">
+                        <i class="fas fa-code"></i>
+                        Code Generation
+                    </h2>
+                    <div class="flex flex-col gap-2">
+                        <div class="flex items-start gap-2">
+                            <textarea id="promptInput" rows="2" 
+                                class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none"
                                 placeholder="Describe what you want to create or modify..."></textarea>
-                            <div class="flex-none">
-                                <label for="codeAttachment" class="btn btn-secondary cursor-pointer">
+                            <div class="flex flex-col gap-2">
+                                <label for="codeAttachment" class="btn btn-secondary btn-sm">
                                     <i class="fas fa-paperclip"></i>
-                                    <span class="sr-only">Attach File</span>
                                 </label>
+                                <button onclick="processPrompt()" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-magic"></i>
+                                </button>
                                 <input type="file" id="codeAttachment" class="hidden" multiple>
                             </div>
                         </div>
-                        <div id="codeAttachments" class="space-y-2"></div>
-                        <div class="flex justify-end">
-                            <button onclick="processPrompt()" class="btn btn-primary">
-                                <i class="fas fa-magic"></i>
-                                Send
-                            </button>
-                        </div>
+                        <div id="codeAttachments" class="space-y-1"></div>
                     </div>
-                    <div id="codeHistory" class="mt-4 max-h-[60vh] overflow-y-auto"></div>
                 </div>
+            </div>
 
-                <!-- Chat Mode -->
-                <div id="chatMode" class="panel p-6 hidden fade-in">
-                    <div class="flex flex-col gap-4">
-                        <div class="flex items-start gap-4">
-                            <textarea id="chatInput" rows="4" 
-                                class="flex-1 bg-gray-700 border border-gray-600 rounded-lg p-4 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 transition-all"
-                                placeholder="Ask a question about your code..."></textarea>
-                            <div class="flex-none">
-                                <label for="chatAttachment" class="btn btn-secondary cursor-pointer">
-                                    <i class="fas fa-paperclip"></i>
-                                    <span class="sr-only">Attach File</span>
-                                </label>
-                                <input type="file" id="chatAttachment" class="hidden" multiple>
-                            </div>
-                        </div>
-                        <div id="chatAttachments" class="space-y-2"></div>
-                        <div class="flex justify-end">
-                            <button onclick="sendChatMessage()" class="btn btn-primary">
+            <!-- Copyright Notice -->
+            <div class="text-center text-gray-400 py-4">
+                <p>Copyright © 2024-2025 <a href="https://github.com/danilofalcao" target="_blank" class="text-blue-500 hover:text-blue-700">Danilo Falcão</a>. All Rights Reserved.</p>
+            </div>
+        </div>
+
+        <!-- Right Sidebar - Chat Panel -->
+        <div id="chatMode" class="w-[400px] flex-none flex flex-col p-2">
+            <!-- Chat Bubble -->
+            <div class="panel flex-1 flex flex-col">
+                <!-- Chat Header -->
+                <div class="p-2 border-b border-[#3e3e42]">
+                    <h2 class="text-center text-sm font-semibold text-gray-400 uppercase flex items-center justify-center gap-2">
+                        <i class="fas fa-comments"></i>
+                        Chat
+                    </h2>
+                </div>
+                
+                <!-- Chat History -->
+                <div id="chatHistory" class="flex-1 overflow-y-auto p-2"></div>
+                
+                <!-- Chat Input -->
+                <div class="p-2 border-t border-[#3e3e42]">
+                    <div id="chatAttachments" class="space-y-1 mb-2"></div>
+                    <div class="flex items-start gap-2">
+                        <textarea id="chatInput" 
+                            class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none h-[80px] overflow-y-auto"
+                            placeholder="Ask a question about your code..."></textarea>
+                        <div class="flex flex-col gap-2">
+                            <label for="chatAttachment" class="btn btn-secondary btn-sm">
+                                <i class="fas fa-paperclip"></i>
+                            </label>
+                            <button onclick="sendChatMessage()" class="btn btn-primary btn-sm">
                                 <i class="fas fa-paper-plane"></i>
-                                Send
                             </button>
+                            <input type="file" id="chatAttachment" class="hidden" multiple>
                         </div>
                     </div>
-                    <div id="chatHistory" class="mt-4 max-h-[60vh] overflow-y-auto"></div>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Copyright Notice -->
-    <footer class="text-center text-gray-400 py-4 mt-8">
-        <p>Copyright © 2024-2025 Danilo Falcão. All rights reserved.</p>
-    </footer>
 
     <!-- Modal for file preview and changes approval -->
     <div id="approvalModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 overflow-y-auto">
