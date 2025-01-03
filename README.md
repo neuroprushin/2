@@ -7,8 +7,14 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 - **Multi-Model Support**: Choose between different AI models for your coding needs:
   - DeepSeek Coder V3
   - Grok 2
-  - Groq (Llama 3.3 70B)
+  - Qwen 2.5 Coder
   - Claude 3.5 Sonnet
+
+- **Real-Time Updates**:
+  - WebSocket-based notifications
+  - Instant feedback for code changes
+  - Real-time workspace updates
+  - Automatic change notifications
 
 - **Workspace Management**:
   - Create and manage multiple workspaces
@@ -22,17 +28,25 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
   - Modify existing code with AI assistance
   - Preview changes before applying them
   - View diffs of proposed changes
-  - Automatic code formatting
 
 - **Interactive Chat**:
   - Discuss code and technical concepts
   - Get explanations about existing code
   - Context-aware responses based on workspace content
 
-- **Code Analysis**:
-  - Built-in linting support
-  - Dependency analysis
-  - File relationship visualization
+## Technical Stack
+
+- **Backend**:
+  - Flask web framework
+  - Flask-SocketIO for WebSocket support
+  - Eventlet for async operations
+  - SQLite for workspace history
+
+- **Frontend**:
+  - Pure JavaScript
+  - TailwindCSS for styling
+  - CodeMirror for code editing
+  - Socket.IO client for real-time notifications
 
 ## Installation
 
@@ -45,7 +59,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
    ```
    DEEPSEEK_API_KEY=your_deepseek_api_key
    GROK_API_KEY=your_grok_api_key
-   GROQ_API_KEY=your_groq_api_key
+   OPENROUTER_API_KEY=your_openrouter_api_key
    ANTHROPIC_API_KEY=your_anthropic_api_key
    ```
 
@@ -62,9 +76,9 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 
 ## Model Capabilities
 
-- **DeepSeek Coder**: Specialized in code generation and modification
-- **Grok 2**: Strong at both code and natural language understanding
-- **Groq (Llama 3.3)**: Fast inference with comprehensive coding knowledge
+- **DeepSeek Coder V3**: Specialized in code generation and modification
+- **Grok 2**: Advanced language model for code and natural language
+- **Qwen 2.5 Coder**: Specialized 32B model for code generation
 - **Claude 3.5 Sonnet**: Advanced reasoning and code understanding
 
 ## Contributing

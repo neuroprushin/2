@@ -2,13 +2,137 @@
 let currentWorkspace = null;
 let currentModel = 'deepseek';
 let pendingChanges = null;
+let socket = null;
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', () => {
+    initializeWebSocket();
     initializeModelSelection();
     loadWorkspaceHistory();
     initializeKeyboardShortcuts();
 });
+
+// WebSocket Setup
+function initializeWebSocket() {
+    socket = io();
+    
+    // Status updates
+    socket.on('status', (data) => {
+        updateStatus(data.message, data.step);
+    });
+    
+    // Progress updates
+    socket.on('progress', (data) => {
+        updateProgress(data.message, data.tokens);
+    });
+    
+    // Connection status
+    socket.on('connect', () => {
+        console.log('Connected to server');
+        updateConnectionStatus(true);
+    });
+    
+    socket.on('disconnect', () => {
+        console.log('Disconnected from server');
+        updateConnectionStatus(false);
+    });
+}
+
+// UI Update Functions
+function updateStatus(message, step) {
+    const statusElement = document.getElementById('statusMessage') || createStatusElement();
+    statusElement.textContent = message;
+    
+    // Update progress bar if exists
+    const progressBar = document.getElementById('progressBar');
+    if (progressBar) {
+        progressBar.style.width = `${(step / 5) * 100}%`;
+    }
+    
+    // Show error styling for negative steps
+    if (step < 0) {
+        statusElement.classList.add('error');
+    } else {
+        statusElement.classList.remove('error');
+    }
+}
+
+function updateProgress(message, tokens) {
+    const progressElement = document.getElementById('progressMessage') || createProgressElement();
+    progressElement.textContent = message;
+}
+
+function updateConnectionStatus(connected) {
+    const statusIndicator = document.getElementById('connectionStatus') || createConnectionIndicator();
+    statusIndicator.className = `connection-status ${connected ? 'connected' : 'disconnected'}`;
+    statusIndicator.title = connected ? 'Connected to server' : 'Disconnected from server';
+}
+
+// UI Element Creation
+function createStatusElement() {
+    const container = document.createElement('div');
+    container.id = 'statusContainer';
+    container.className = 'status-container fixed bottom-4 right-4 p-4 bg-gray-800 rounded-lg shadow-lg z-50';
+    
+    const message = document.createElement('div');
+    message.id = 'statusMessage';
+    message.className = 'text-white';
+    
+    const progress = document.createElement('div');
+    progress.className = 'mt-2 h-2 bg-gray-700 rounded-full overflow-hidden';
+    
+    const bar = document.createElement('div');
+    bar.id = 'progressBar';
+    bar.className = 'h-full bg-blue-500 transition-all duration-300';
+    bar.style.width = '0%';
+    
+    progress.appendChild(bar);
+    container.appendChild(message);
+    container.appendChild(progress);
+    document.body.appendChild(container);
+    
+    return message;
+}
+
+function createProgressElement() {
+    const container = document.createElement('div');
+    container.id = 'progressContainer';
+    container.className = 'progress-container fixed bottom-24 right-4 p-4 bg-gray-800 rounded-lg shadow-lg z-50';
+    
+    const message = document.createElement('div');
+    message.id = 'progressMessage';
+    message.className = 'text-white';
+    
+    container.appendChild(message);
+    document.body.appendChild(container);
+    
+    return message;
+}
+
+function createConnectionIndicator() {
+    const indicator = document.createElement('div');
+    indicator.id = 'connectionStatus';
+    indicator.className = 'connection-status';
+    indicator.style.cssText = `
+        position: fixed;
+        top: 1rem;
+        right: 1rem;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        z-index: 100;
+    `;
+    
+    const style = document.createElement('style');
+    style.textContent = `
+        .connection-status.connected { background-color: #10B981; }
+        .connection-status.disconnected { background-color: #EF4444; }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(indicator);
+    
+    return indicator;
+}
 
 // Model Selection
 function initializeModelSelection() {
@@ -408,8 +532,6 @@ async function processPrompt() {
         return;
     }
 
-    showLoading('Generating code...');
-
     try {
         const response = await fetch('/process', {
             method: 'POST',
@@ -439,8 +561,6 @@ async function processPrompt() {
     } catch (error) {
         console.error('Error:', error);
         showError('Failed to process prompt: ' + error.message);
-    } finally {
-        hideLoading();
     }
 }
 
@@ -809,6 +929,18 @@ function hideLoading() {
 
 function hideModal() {
     document.getElementById('approvalModal').classList.add('hidden');
+    
+    // Clear status message
+    const statusContainer = document.getElementById('statusContainer');
+    if (statusContainer) {
+        statusContainer.remove();
+    }
+    
+    // Clear progress message
+    const progressContainer = document.getElementById('progressContainer');
+    if (progressContainer) {
+        progressContainer.remove();
+    }
 }
 
 function showError(message) {

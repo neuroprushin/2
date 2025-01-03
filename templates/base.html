@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>J.A.R.V.I.S.</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     
@@ -14,7 +17,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/scroll/simplescrollbars.min.css" rel="stylesheet">
     
     <!-- Custom CSS -->
-    <link href="/static/styles.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='styles.css') }}?v={{ cache_buster }}" rel="stylesheet">
 </head>
 <body class="min-h-screen">
     <div class="container mx-auto px-6 py-8">
@@ -161,7 +164,53 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/matchbrackets.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/meta.min.js"></script>
     
-    <!-- Custom Script -->
-    <script src="/static/script.js"></script>
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    
+    <script>
+        // Connect to Socket.IO server with automatic reconnection
+        const socket = io({
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 20000
+        });
+
+        // Log connection status
+        socket.on('connect', () => {
+            console.log('Connected to WebSocket server');
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from WebSocket server - attempting to reconnect...');
+        });
+
+        socket.on('reconnect', (attemptNumber) => {
+            console.log('Reconnected to WebSocket server after ' + attemptNumber + ' attempts');
+        });
+
+        socket.on('reconnect_attempt', () => {
+            console.log('Attempting to reconnect to WebSocket server...');
+        });
+
+        socket.on('error', (error) => {
+            console.error('Socket.IO error:', error);
+        });
+
+        // Listen for changes applied event
+        socket.on('changes_applied', (data) => {
+            console.log('Changes applied:', data);
+            // Get the current workspace ID from the page
+            const currentWorkspaceName = document.getElementById('currentWorkspaceName').textContent;
+            
+            // Only reload if changes are for the current workspace
+            if (data.workspace_id === currentWorkspaceName) {
+                console.log('Reloading page to show changes...');
+                window.location.reload();
+            }
+        });
+    </script>
 </body>
 </html> 
