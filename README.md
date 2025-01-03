@@ -10,6 +10,20 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
   - Qwen 2.5 Coder
   - Claude 3.5 Sonnet
 
+- **File Attachment Support**:
+  - PDF files with text extraction
+  - Microsoft Word documents (.docx)
+  - Excel spreadsheets with sheet parsing
+  - Images with OCR capabilities
+  - Enhanced Markdown with GFM support
+  - All major programming languages
+  - Configuration files
+  - Text and documentation files
+  - File preview with syntax highlighting
+  - Multiple file upload support
+  - Progress indicators and file size display
+  - Type-specific icons and preview buttons
+
 - **Real-Time Updates**:
   - WebSocket-based notifications
   - Instant feedback for code changes
@@ -33,6 +47,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
   - Discuss code and technical concepts
   - Get explanations about existing code
   - Context-aware responses based on workspace content
+  - Attach files for additional context
 
 ## Technical Stack
 
@@ -47,6 +62,11 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
   - TailwindCSS for styling
   - CodeMirror for code editing
   - Socket.IO client for real-time notifications
+  - PDF.js for PDF processing
+  - Mammoth.js for Word documents
+  - XLSX.js for Excel files
+  - Tesseract.js for OCR
+  - Marked and Unified.js for Markdown
 
 ## Installation
 
