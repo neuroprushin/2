@@ -413,7 +413,60 @@ IMPORTANT: Return the JSON object directly, not inside a code block."""
 
         socketio.emit('status', {'message': 'Sending request to AI...', 'step': 2})
         print("\nSending analysis request...")
-        if model_id == 'claude':
+        
+        if model_id == 'qwen':
+            try:
+                # Try streaming first
+                response = client.chat.completions.create(
+                    model=model_config['models']['code'],
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": analysis_prompt}
+                    ],
+                    stream=True,
+                    max_tokens=4000,
+                    temperature=0.7,
+                    http_referer="https://github.com/danilofalcao",
+                    x_title="J.A.R.V.I.S."
+                )
+                
+                response_chunks = []
+                tokens_received = 0
+                for chunk in response:
+                    if chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        response_chunks.append(content)
+                        tokens_received += len(content.split())
+                        socketio.emit('progress', {
+                            'message': f'Received {tokens_received} tokens...',
+                            'tokens': tokens_received
+                        })
+                
+                full_text = ''.join(response_chunks)
+                
+            except Exception as qwen_error:
+                print(f"Qwen streaming error, trying non-streaming: {str(qwen_error)}")
+                # Fallback to non-streaming request
+                response = client.chat.completions.create(
+                    model=model_config['models']['code'],
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": analysis_prompt}
+                    ],
+                    stream=False,
+                    max_tokens=4000,
+                    temperature=0.7,
+                    http_referer="https://github.com/danilofalcao",
+                    x_title="J.A.R.V.I.S."
+                )
+                
+                if response.choices and response.choices[0].message.content:
+                    full_text = response.choices[0].message.content
+                else:
+                    print("Qwen response failed, falling back to DeepSeek")
+                    return get_code_suggestion(prompt, files_content, workspace_context, "deepseek")
+                    
+        elif model_id == 'claude':
             response = client.messages.create(
                 model=model_config['models']['code'],
                 system=system_prompt,
@@ -423,6 +476,7 @@ IMPORTANT: Return the JSON object directly, not inside a code block."""
             )
             # Claude doesn't need streaming for this use case
             response_chunks = [response.content[0].text]
+            full_text = ''.join(response_chunks)
         else:
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -447,11 +501,10 @@ IMPORTANT: Return the JSON object directly, not inside a code block."""
                         'message': f'Received {tokens_received} tokens...',
                         'tokens': tokens_received
                     })
+            full_text = ''.join(response_chunks)
         
         socketio.emit('status', {'message': 'Processing AI response...', 'step': 3})
         print("\n=== Step 2: Processing response ===")
-        # Join all chunks
-        full_text = ''.join(response_chunks)
         print("\nFull response length:", len(full_text))
         print("\nFirst 500 chars:", full_text[:500])
         
@@ -493,6 +546,7 @@ IMPORTANT: Return the JSON object directly, not inside a code block."""
             raise ValueError("Could not find valid JSON response")
         
         return result
+        
     except Exception as e:
         socketio.emit('status', {'message': f'Error: {str(e)}', 'step': -1})
         print(f"\nError getting code suggestion: {str(e)}")
