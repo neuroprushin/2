@@ -108,3 +108,12 @@ Contributions are welcome! Please feel free to submit pull requests.
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
+
+## Special Thanks
+
+Special thanks to:
+- **Nikole Cardoso** for her invaluable contributions and support
+- **Guilherme Guirro** for his expertise and guidance
+- **Felipe Santos** for his dedication and insights
+
+Their contributions have been instrumental in making J.A.R.V.I.S. better.
