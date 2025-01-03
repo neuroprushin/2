@@ -44,7 +44,7 @@
 <body class="min-h-screen bg-[#1e1e1e]">
     <div class="flex h-screen">
         <!-- Left Sidebar - Workspace Panel -->
-        <div class="workspace-panel w-[422px] flex-none p-2 h-screen sticky top-0">
+        <div class="workspace-panel w-[549px] flex-none p-2 h-screen sticky top-0">
             <!-- Workspace Bubble -->
             <div class="panel flex-1 flex flex-col h-full overflow-y-auto">
                 <!-- Current Workspace -->
@@ -96,14 +96,14 @@
 
         <!-- Main Content Area -->
         <div class="flex-1 flex flex-col p-2">
+            <!-- Logo and Title -->
+            <div class="p-4 flex flex-col items-center mb-2">
+                <img src="/logo.svg" alt="J.A.R.V.I.S. Logo" width="78" height="78" class="mb-2">
+                <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-blue-700">J.A.R.V.I.S.</h1>
+            </div>
+
             <!-- Main Content Bubble -->
             <div class="panel flex-1 flex flex-col">
-                <!-- Logo and Title -->
-                <div class="p-4 flex flex-col items-center border-b border-[#3e3e42]">
-                    <img src="/logo.svg" alt="J.A.R.V.I.S. Logo" width="78" height="78" class="mb-2">
-                    <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-blue-700">J.A.R.V.I.S.</h1>
-                </div>
-
                 <!-- Code History -->
                 <div id="codeHistory" class="flex-1 overflow-y-auto p-4"></div>
 
@@ -134,13 +134,13 @@
             </div>
 
             <!-- Copyright Notice -->
-            <div class="text-center text-gray-400 py-4">
+            <div class="text-center text-gray-400 py-2 mt-2">
                 <p>Copyright © 2024-2025 <a href="https://github.com/danilofalcao" target="_blank" class="text-blue-500 hover:text-blue-700">Danilo Falcão</a>. All Rights Reserved.</p>
             </div>
         </div>
 
         <!-- Right Sidebar - Chat Panel -->
-        <div id="chatMode" class="w-[480px] flex-none flex flex-col p-2 h-screen sticky top-0">
+        <div id="chatMode" class="w-[624px] flex-none flex flex-col p-2 h-screen sticky top-0">
             <!-- Chat Bubble -->
             <div class="panel flex-1 flex flex-col h-full">
                 <!-- Chat Header -->

@@ -9,7 +9,7 @@
     --text-primary: #d4d4d4;
     --text-secondary: #808080;
     --border-color: #3e3e42;
-    --sidebar-width: 422px;
+    --sidebar-width: 549px;
 }
 
 /* Layout Adjustments */
@@ -219,12 +219,16 @@ body {
     margin: 1rem 0;
     border-radius: 0.5rem;
     border: 1px solid var(--border-color);
+    max-width: 100%;
+    overflow-x: auto;
 }
 
 .chat-message code {
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 0.9em;
     line-height: 1.5;
+    white-space: pre;
+    word-wrap: normal;
 }
 
 .chat-message h1, 
