@@ -44,49 +44,52 @@
 <body class="min-h-screen bg-[#1e1e1e]">
     <div class="flex h-screen">
         <!-- Left Sidebar - Workspace Panel -->
-        <div class="workspace-panel w-[352px] flex-none overflow-y-auto">
-            <!-- Current Workspace -->
-            <div class="panel p-4 m-2">
-                <div class="flex flex-col items-center mb-3">
-                    <h2 class="text-base font-bold flex items-center gap-2 mb-2">
-                        <i class="fas fa-folder text-blue-500"></i>
-                        Workspace
-                    </h2>
-                    <button onclick="createWorkspace()" class="btn btn-primary btn-sm">
-                        <i class="fas fa-plus"></i>
-                    </button>
+        <div class="workspace-panel w-[352px] flex-none p-2 h-screen sticky top-0">
+            <!-- Workspace Bubble -->
+            <div class="panel flex-1 flex flex-col h-full overflow-y-auto">
+                <!-- Current Workspace -->
+                <div class="p-4 border-b border-[#3e3e42] flex-none">
+                    <div class="flex flex-col items-center mb-3">
+                        <h2 class="text-base font-bold flex items-center gap-2 mb-2">
+                            <i class="fas fa-folder text-blue-500"></i>
+                            Workspace
+                        </h2>
+                        <button onclick="createWorkspace()" class="btn btn-primary btn-sm">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <div id="currentWorkspaceInfo" class="mb-2 text-sm text-gray-400 hidden text-center">
+                        <p>Current Workspace:</p>
+                        <p id="currentWorkspaceName" class="truncate font-medium text-white"></p>
+                    </div>
+                    <div id="workspaceTree" class="file-tree max-h-[200px] overflow-y-auto"></div>
                 </div>
-                <div id="currentWorkspaceInfo" class="mb-2 text-sm text-gray-400 hidden text-center">
-                    <p>Current Workspace:</p>
-                    <p id="currentWorkspaceName" class="truncate font-medium text-white"></p>
-                </div>
-                <div id="workspaceTree" class="file-tree max-h-[200px] overflow-y-auto"></div>
-            </div>
 
-            <!-- Workspace History -->
-            <div class="panel p-4 m-2">
-                <div class="flex flex-col items-center">
-                    <h2 class="text-base font-bold mb-2 flex items-center gap-2">
-                        <i class="fas fa-history text-blue-500"></i>
-                        Workspace History
-                    </h2>
-                    <div id="workspaceHistory" class="space-y-2 max-h-[150px] overflow-y-auto w-full"></div>
+                <!-- Workspace History -->
+                <div class="p-4 border-b border-[#3e3e42] flex-none">
+                    <div class="flex flex-col items-center">
+                        <h2 class="text-base font-bold mb-2 flex items-center gap-2">
+                            <i class="fas fa-history text-blue-500"></i>
+                            Workspace History
+                        </h2>
+                        <div id="workspaceHistory" class="space-y-2 max-h-[150px] overflow-y-auto w-full"></div>
+                    </div>
                 </div>
-            </div>
 
-            <!-- Model Selection -->
-            <div class="panel p-4 m-2">
-                <div class="flex flex-col items-center">
-                    <h2 class="text-base font-bold mb-2 flex items-center gap-2">
-                        <i class="fas fa-robot text-blue-500"></i>
-                        AI Model
-                    </h2>
-                    <select id="modelSelect" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-sm text-center">
-                        <option value="deepseek">DeepSeek V3</option>
-                        <option value="grok">Grok 2</option>
-                        <option value="qwen">Qwen 2.5 Coder</option>
-                        <option value="claude">Claude 3.5 Sonnet</option>
-                    </select>
+                <!-- Model Selection -->
+                <div class="p-4 flex-none">
+                    <div class="flex flex-col items-center">
+                        <h2 class="text-base font-bold mb-2 flex items-center gap-2">
+                            <i class="fas fa-robot text-blue-500"></i>
+                            AI Model
+                        </h2>
+                        <select id="modelSelect" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-sm text-center">
+                            <option value="deepseek">DeepSeek V3</option>
+                            <option value="grok">Grok 2</option>
+                            <option value="qwen">Qwen 2.5 Coder</option>
+                            <option value="claude">Claude 3.5 Sonnet</option>
+                        </select>
+                    </div>
                 </div>
             </div>
         </div>
@@ -113,7 +116,7 @@
                     <div class="flex flex-col gap-2">
                         <div class="flex items-start gap-2">
                             <textarea id="promptInput" rows="2" 
-                                class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none"
+                                class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none text-black"
                                 placeholder="Describe what you want to create or modify..."></textarea>
                             <div class="flex flex-col gap-2">
                                 <label for="codeAttachment" class="btn btn-secondary btn-sm">
@@ -137,11 +140,11 @@
         </div>
 
         <!-- Right Sidebar - Chat Panel -->
-        <div id="chatMode" class="w-[400px] flex-none flex flex-col p-2">
+        <div id="chatMode" class="w-[400px] flex-none flex flex-col p-2 h-screen sticky top-0">
             <!-- Chat Bubble -->
-            <div class="panel flex-1 flex flex-col">
+            <div class="panel flex-1 flex flex-col h-full">
                 <!-- Chat Header -->
-                <div class="p-2 border-b border-[#3e3e42]">
+                <div class="p-2 border-b border-[#3e3e42] flex-none">
                     <h2 class="text-center text-sm font-semibold text-gray-400 uppercase flex items-center justify-center gap-2">
                         <i class="fas fa-comments"></i>
                         Chat
@@ -149,14 +152,14 @@
                 </div>
                 
                 <!-- Chat History -->
-                <div id="chatHistory" class="flex-1 overflow-y-auto p-2"></div>
+                <div id="chatHistory" class="flex-1 overflow-y-auto p-2 min-h-0"></div>
                 
                 <!-- Chat Input -->
-                <div class="p-2 border-t border-[#3e3e42]">
+                <div class="p-2 border-t border-[#3e3e42] flex-none">
                     <div id="chatAttachments" class="space-y-1 mb-2"></div>
                     <div class="flex items-start gap-2">
                         <textarea id="chatInput" 
-                            class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none h-[80px] overflow-y-auto"
+                            class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none h-[80px] overflow-y-auto text-black"
                             placeholder="Ask a question about your code..."></textarea>
                         <div class="flex flex-col gap-2">
                             <label for="chatAttachment" class="btn btn-secondary btn-sm">
