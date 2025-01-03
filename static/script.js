@@ -532,15 +532,28 @@ async function processPrompt() {
         return;
     }
 
+    // Collect attachments
+    const attachments = [];
+    document.querySelectorAll('#codeAttachments > div').forEach(div => {
+        attachments.push({
+            name: div.querySelector('span').textContent,
+            content: div.dataset.content // Get the stored file content
+        });
+    });
+
+    showLoading();
     try {
         const response = await fetch('/process', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json'
+            },
             body: JSON.stringify({
-                prompt,
+                prompt: prompt,
                 workspace_dir: currentWorkspace,
-                model_id: currentModel
-            }),
+                model_id: document.getElementById('modelSelect').value,
+                attachments: attachments
+            })
         });
 
         const data = await response.json();
@@ -561,6 +574,8 @@ async function processPrompt() {
     } catch (error) {
         console.error('Error:', error);
         showError('Failed to process prompt: ' + error.message);
+    } finally {
+        hideLoading();
     }
 }
 
@@ -576,24 +591,40 @@ async function sendChatMessage() {
         return;
     }
 
+    // Collect attachments
+    const attachments = [];
+    document.querySelectorAll('#chatAttachments > div').forEach(div => {
+        attachments.push({
+            name: div.querySelector('span').textContent,
+            content: div.dataset.content // Get the stored file content
+        });
+    });
+
+    // Append user message first
     appendChatMessage(message, 'user');
     chatInput.value = '';
 
-    const loadingMessage = appendLoadingMessage();
-
+    // Show loading indicator
+    const loadingMessage = appendChatMessage('<i class="fas fa-spinner fa-spin"></i> Thinking...', 'assistant', true);
+    
     try {
         const response = await fetch('/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json'
+            },
             body: JSON.stringify({
                 prompt: message,
                 workspace_dir: currentWorkspace,
-                model_id: currentModel
-            }),
+                model_id: document.getElementById('modelSelect').value,
+                attachments: attachments
+            })
         });
 
         const data = await response.json();
-        removeLoadingMessage(loadingMessage);
+        
+        // Remove loading message
+        loadingMessage.remove();
 
         if (data.status === 'success') {
             const formattedResponse = formatChatResponse(data.response);
@@ -603,7 +634,7 @@ async function sendChatMessage() {
         }
     } catch (error) {
         console.error('Error:', error);
-        removeLoadingMessage(loadingMessage);
+        loadingMessage.remove();
         appendErrorMessage('Error: ' + error.message);
     }
 }
@@ -676,7 +707,7 @@ function formatChatResponse(text) {
 function appendChatMessage(content, type, isHtml = false) {
     const chatHistory = document.getElementById('chatHistory');
     const messageDiv = document.createElement('div');
-    messageDiv.className = `chat-message ${type}`;
+    messageDiv.className = `chat-message ${type} mb-4 p-4 rounded ${type === 'user' ? 'bg-blue-900' : 'bg-gray-800'}`;
     
     if (isHtml) {
         messageDiv.innerHTML = content;
@@ -689,16 +720,8 @@ function appendChatMessage(content, type, isHtml = false) {
     return messageDiv;
 }
 
-function appendLoadingMessage() {
-    return appendChatMessage('<i class="fas fa-spinner fa-spin mr-2"></i>Thinking...', 'assistant', true);
-}
-
 function appendErrorMessage(message) {
-    appendChatMessage(message, 'assistant text-red-500');
-}
-
-function removeLoadingMessage(messageDiv) {
-    messageDiv.remove();
+    appendChatMessage(`<span class="text-red-500">${message}</span>`, 'assistant', true);
 }
 
 // Modal Management
@@ -1079,7 +1102,7 @@ async function showFileContent(filePath) {
 }
 
 function formatFileSize(bytes) {
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const units = ['B', 'KB', 'MB', 'GB'];
     let size = bytes;
     let unitIndex = 0;
     
@@ -1110,4 +1133,219 @@ function initializeKeyboardShortcuts() {
             sendChatMessage();
         }
     });
-} 
+}
+
+// File attachment handling
+async function handleFileAttachment(fileInput, attachmentsContainer) {
+    const files = Array.from(fileInput.files);
+    attachmentsContainer.innerHTML = '';
+    
+    for (const file of files) {
+        try {
+            const content = await extractFileContent(file);
+            if (content) {
+                addAttachmentToContainer(file.name, content, attachmentsContainer, getFileType(file));
+            }
+        } catch (error) {
+            console.error('Error processing file:', error);
+            showError(`Error processing ${file.name}: ${error.message}`);
+        }
+    }
+}
+
+async function extractFileContent(file) {
+    const reader = new FileReader();
+
+    // Helper function to wrap FileReader in a promise
+    const readFile = (method) => {
+        return new Promise((resolve, reject) => {
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.onload = () => resolve(reader.result);
+            method.call(reader, file);
+        });
+    };
+
+    try {
+        switch (true) {
+            // PDF Files
+            case file.type === 'application/pdf':
+                const arrayBuffer = await readFile(reader.readAsArrayBuffer);
+                const pdf = await pdfjsLib.getDocument(new Uint8Array(arrayBuffer)).promise;
+                let pdfText = '';
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    pdfText += textContent.items.map(item => item.str).join(' ') + '\n';
+                }
+                return pdfText;
+
+            // Word Documents
+            case file.type.includes('word') || file.type.includes('openxmlformats-officedocument.wordprocessingml'):
+                const docArrayBuffer = await readFile(reader.readAsArrayBuffer);
+                const result = await mammoth.extractRawText({ arrayBuffer: docArrayBuffer });
+                return result.value;
+
+            // Excel Files
+            case file.type.includes('excel') || file.type.includes('spreadsheetml'):
+                const excelData = await readFile(reader.readAsArrayBuffer);
+                const workbook = XLSX.read(excelData, { type: 'array' });
+                let excelText = '';
+                workbook.SheetNames.forEach(sheetName => {
+                    const sheet = workbook.Sheets[sheetName];
+                    excelText += `Sheet: ${sheetName}\n${XLSX.utils.sheet_to_string(sheet)}\n\n`;
+                });
+                return excelText;
+
+            // Images (OCR)
+            case file.type.startsWith('image/'):
+                const imageUrl = await readFile(reader.readAsDataURL);
+                const worker = await Tesseract.createWorker('eng');
+                const { data: { text } } = await worker.recognize(imageUrl);
+                await worker.terminate();
+                return text;
+
+            // Markdown (Enhanced)
+            case file.name.endsWith('.md'):
+                const mdContent = await readFile(reader.readAsText);
+                const parsed = marked.parse(mdContent, {
+                    gfm: true,
+                    breaks: true,
+                    headerIds: false
+                });
+                // Strip HTML tags for context
+                return parsed.replace(/<[^>]*>/g, ' ');
+
+            // Text and Code Files
+            case file.type.startsWith('text/') || 
+                 file.type === 'application/json' ||
+                 file.name.match(/\.(txt|js|py|java|c|cpp|h|hpp|cs|html|css|json|yml|yaml|xml|sql|sh|bash|r|rb|php|go|rust|swift)$/i):
+                return await readFile(reader.readAsText);
+
+            // Default: Try as text
+            default:
+                if (file.size > 10 * 1024 * 1024) { // 10MB limit for unknown files
+                    throw new Error('File too large for unknown type');
+                }
+                return await readFile(reader.readAsText);
+        }
+    } catch (error) {
+        throw new Error(`Failed to process ${file.name}: ${error.message}`);
+    }
+}
+
+function getFileType(file) {
+    if (file.type === 'application/pdf') return 'pdf';
+    if (file.type.includes('word')) return 'word';
+    if (file.type.includes('excel')) return 'excel';
+    if (file.type.startsWith('image/')) return 'image';
+    if (file.name.endsWith('.md')) return 'markdown';
+    return 'text';
+}
+
+function addAttachmentToContainer(fileName, content, container, type) {
+    const fileDiv = document.createElement('div');
+    fileDiv.className = 'flex items-center justify-between bg-gray-700 p-2 rounded mb-2';
+    fileDiv.dataset.content = content;
+    
+    const iconMap = {
+        'pdf': 'fa-file-pdf text-red-500',
+        'word': 'fa-file-word text-blue-500',
+        'excel': 'fa-file-excel text-green-500',
+        'image': 'fa-file-image text-purple-500',
+        'markdown': 'fa-file-alt text-blue-400',
+        'text': 'fa-file-code text-blue-500'
+    };
+    
+    const iconClass = iconMap[type] || 'fa-file text-gray-500';
+    
+    fileDiv.innerHTML = `
+        <div class="flex items-center gap-2">
+            <i class="fas ${iconClass}"></i>
+            <span class="text-sm">${fileName}</span>
+            <span class="text-xs text-gray-400">(${formatFileSize(new Blob([content]).size)})</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <button onclick="previewAttachment(this.parentElement.parentElement)" class="text-gray-400 hover:text-blue-500" title="Preview">
+                <i class="fas fa-eye"></i>
+            </button>
+            <button onclick="this.parentElement.parentElement.remove()" class="text-gray-400 hover:text-red-500" title="Remove">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `;
+    container.appendChild(fileDiv);
+}
+
+function formatFileSize(bytes) {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIndex = 0;
+    
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex++;
+    }
+    
+    return `${size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function previewAttachment(attachmentDiv) {
+    const fileName = attachmentDiv.querySelector('span').textContent;
+    const content = attachmentDiv.dataset.content;
+    
+    const modal = document.getElementById('approvalModal');
+    const preview = document.getElementById('changesPreview');
+    const modalTitle = modal.querySelector('.modal-header h2');
+    const footer = modal.querySelector('.modal-footer .flex');
+    
+    modalTitle.textContent = `Preview: ${fileName}`;
+    preview.innerHTML = '';
+    footer.innerHTML = '';
+    
+    const previewContent = document.createElement('div');
+    previewContent.className = 'bg-gray-900 p-4 rounded-lg';
+    
+    if (fileName.endsWith('.pdf')) {
+        // Format PDF content for readability
+        const formattedContent = content
+            .split('\n')
+            .filter(line => line.trim())
+            .join('\n\n');
+        previewContent.innerHTML = `<pre class="whitespace-pre-wrap font-mono text-sm">${formattedContent}</pre>`;
+    } else {
+        // For text files, use CodeMirror
+        const editorDiv = document.createElement('div');
+        editorDiv.style.height = '500px';
+        
+        const textarea = document.createElement('textarea');
+        textarea.value = content;
+        previewContent.appendChild(textarea);
+        
+        CodeMirror.fromTextArea(textarea, {
+            mode: getLanguageMode(fileName),
+            theme: 'monokai',
+            lineNumbers: true,
+            readOnly: true,
+            viewportMargin: Infinity
+        });
+    }
+    
+    preview.appendChild(previewContent);
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn btn-secondary';
+    closeBtn.textContent = 'Close';
+    closeBtn.onclick = hideModal;
+    footer.appendChild(closeBtn);
+    
+    modal.classList.remove('hidden');
+}
+
+// Add event listeners for file inputs
+document.getElementById('codeAttachment').addEventListener('change', function() {
+    handleFileAttachment(this, document.getElementById('codeAttachments'));
+});
+
+document.getElementById('chatAttachment').addEventListener('change', function() {
+    handleFileAttachment(this, document.getElementById('chatAttachments'));
+}); 
