@@ -1,8 +1,10 @@
+import eventlet
+eventlet.monkey_patch()
+
 from flask import Flask, render_template, request, jsonify, send_from_directory
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
-from groq import Groq
 from anthropic import Anthropic
 import json
 import shutil
@@ -11,7 +13,7 @@ from datetime import datetime
 import sqlite3
 import difflib
 import re
-import tempfile
+from flask_socketio import SocketIO, emit
 
 # Model configurations
 AVAILABLE_MODELS = {
@@ -125,6 +127,7 @@ for model_id, config in AVAILABLE_MODELS.items():
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # For session management
+socketio = SocketIO(app, cors_allowed_origins="*")
 load_dotenv()
 
 # Set up workspace directory
@@ -384,6 +387,7 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
     model_config = AVAILABLE_MODELS[model_id]
     
     try:
+        socketio.emit('status', {'message': 'Analyzing files...', 'step': 1})
         print("\n=== Step 1: Analyzing files ===")
         # First send all files to AI for analysis
         files_list = []
@@ -407,6 +411,7 @@ Do not include files in the operations if they don't need modifications.
 
 IMPORTANT: Return the JSON object directly, not inside a code block."""
 
+        socketio.emit('status', {'message': 'Sending request to AI...', 'step': 2})
         print("\nSending analysis request...")
         if model_id == 'claude':
             response = client.messages.create(
@@ -432,23 +437,36 @@ IMPORTANT: Return the JSON object directly, not inside a code block."""
             )
             
             response_chunks = []
+            tokens_received = 0
             for chunk in response:
                 if chunk.choices[0].delta.content:
-                    response_chunks.append(chunk.choices[0].delta.content)
+                    content = chunk.choices[0].delta.content
+                    response_chunks.append(content)
+                    tokens_received += len(content.split())
+                    socketio.emit('progress', {
+                        'message': f'Received {tokens_received} tokens...',
+                        'tokens': tokens_received
+                    })
         
+        socketio.emit('status', {'message': 'Processing AI response...', 'step': 3})
         print("\n=== Step 2: Processing response ===")
         # Join all chunks
         full_text = ''.join(response_chunks)
         print("\nFull response length:", len(full_text))
         print("\nFirst 500 chars:", full_text[:500])
         
+        # Try to parse the response in different ways
+        result = None
         try:
             # First try direct JSON parsing
             result = json.loads(full_text)
             if isinstance(result, dict) and 'operations' in result:
                 return result
         except json.JSONDecodeError:
-            # Try to extract JSON from code blocks
+            pass
+
+        # Try to extract JSON from code blocks
+        if not result:
             matches = re.finditer(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', full_text)
             for match in matches:
                 try:
@@ -458,8 +476,9 @@ IMPORTANT: Return the JSON object directly, not inside a code block."""
                         return result
                 except:
                     continue
-            
-            # Try to find any JSON object
+        
+        # Try to find any JSON object
+        if not result:
             matches = re.finditer(r'\{[\s\S]*?\}', full_text)
             for match in matches:
                 try:
@@ -469,10 +488,13 @@ IMPORTANT: Return the JSON object directly, not inside a code block."""
                         return result
                 except:
                     continue
-            
+        
+        if not result:
             raise ValueError("Could not find valid JSON response")
-            
+        
+        return result
     except Exception as e:
+        socketio.emit('status', {'message': f'Error: {str(e)}', 'step': -1})
         print(f"\nError getting code suggestion: {str(e)}")
         raise
 
@@ -851,124 +873,99 @@ def process_prompt():
             return jsonify({'status': 'error', 'message': 'No prompt provided'}), 400
             
         if not workspace_dir:
+            socketio.emit('status', {'message': 'Creating new workspace...', 'step': 0})
             _, workspace_dir = create_workspace()
         elif not os.path.exists(workspace_dir):
             return jsonify({'status': 'error', 'message': 'Invalid workspace directory'}), 400
         
-        try:
-            # First get all existing files content
-            print(f"Reading files from workspace: {workspace_dir}")
-            files_content = get_existing_files(workspace_dir)
-            print(f"Found {len(files_content)} readable files")
-            
-            print("Getting workspace context...")
-            workspace_context = get_workspace_context(workspace_dir)
-            
-            print(f"Getting suggestions from AI model: {model_id}")
-            # Get suggestions from AI, passing the file contents
-            suggestions = get_code_suggestion(prompt, files_content, workspace_context, model_id)
-            
-            print("AI Response:", json.dumps(suggestions, indent=2))
-            
-            # Validate suggestions format
-            if not isinstance(suggestions, dict):
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Invalid response format from AI model'
-                }), 500
-            
-            # Don't apply changes yet, just return the suggestions for approval
-            if not suggestions.get('operations'):
-                return jsonify({
-                    'status': 'error',
-                    'message': 'No changes suggested by the AI'
-                }), 400
-            
-            print("Getting workspace structure...")
-            structure = get_workspace_structure(workspace_dir)
-            
-            # Create temp directories for comparison
-            with tempfile.TemporaryDirectory() as temp_dir:
-                current_dir = os.path.join(temp_dir, 'current')
-                new_dir = os.path.join(temp_dir, 'new')
-                os.makedirs(current_dir)
-                os.makedirs(new_dir)
-                
-                # Write current files
-                for file_path, content in files_content.items():
-                    current_file = os.path.join(current_dir, os.path.basename(file_path))
-                    with open(current_file, 'w', encoding='utf-8') as f:
-                        f.write(content)
-                
-                # Process each operation and generate diffs
-                print("Generating diffs for operations...")
-                for operation in suggestions.get('operations', []):
-                    if operation.get('type') == 'edit_file':
-                        file_path = operation.get('path')
-                        if file_path in files_content:
-                            current_content = files_content[file_path]
-                            
-                            # If we have a changes array, apply each change
-                            if 'changes' in operation:
-                                new_content = current_content
-                                for change in operation['changes']:
-                                    old_text = change.get('old', '')
-                                    new_text = change.get('new', '')
-                                    if old_text in new_content:  # Only replace if old text exists
-                                        new_content = new_content.replace(old_text, new_text)
-                                operation['content'] = new_content
-                                
-                                # Write new content for comparison
-                                new_file = os.path.join(new_dir, os.path.basename(file_path))
-                                with open(new_file, 'w', encoding='utf-8') as f:
-                                    f.write(new_content)
-                                
-                                # Generate diff
-                                current_lines = current_content.splitlines()
-                                new_lines = new_content.splitlines()
-                                
-                                diff_lines = list(difflib.unified_diff(
-                                    current_lines,
-                                    new_lines,
-                                    fromfile=f'a/{file_path}',
-                                    tofile=f'b/{file_path}',
-                                    lineterm=''
-                                ))
-                                
-                                if diff_lines:  # Only include diff if there are actual changes
-                                    operation['diff'] = '\n'.join(diff_lines)
-                                else:
-                                    # If no changes were made, mark this operation for removal
-                                    operation['no_changes'] = True
-                
-                # Remove operations that didn't result in any changes
-                suggestions['operations'] = [op for op in suggestions['operations'] 
-                                          if not op.get('no_changes', False)]
-                
-                if not suggestions['operations']:
-                    return jsonify({
-                        'status': 'error',
-                        'message': 'No valid changes to apply'
-                    }), 400
-                
-                return jsonify({
-                    'status': 'success',
-                    'explanation': suggestions.get('explanation', ''),
-                    'operations': suggestions.get('operations', []),
-                    'workspace_dir': workspace_dir,
-                    'structure': structure,
-                    'requires_approval': True
-                })
-                
-        except Exception as e:
-            import traceback
-            error_trace = traceback.format_exc()
-            print(f"Error processing prompt:\n{error_trace}")
+        # First get all existing files content
+        socketio.emit('status', {'message': 'Reading workspace files...', 'step': 1})
+        print(f"Reading files from workspace: {workspace_dir}")
+        files_content = get_existing_files(workspace_dir)
+        print(f"Found {len(files_content)} readable files")
+        
+        print("Getting workspace context...")
+        workspace_context = get_workspace_context(workspace_dir)
+        
+        print(f"Getting suggestions from AI model: {model_id}")
+        # Get suggestions from AI, passing the file contents
+        suggestions = get_code_suggestion(prompt, files_content, workspace_context, model_id)
+        
+        print("AI Response:", json.dumps(suggestions, indent=2))
+        
+        # Validate suggestions format
+        if not isinstance(suggestions, dict):
             return jsonify({
                 'status': 'error',
-                'message': str(e),
-                'trace': error_trace if app.debug else None
+                'message': 'Invalid response format from AI model'
             }), 500
+        
+        # Don't apply changes yet, just return the suggestions for approval
+        if not suggestions.get('operations'):
+            return jsonify({
+                'status': 'error',
+                'message': 'No changes suggested by the AI'
+            }), 400
+        
+        socketio.emit('status', {'message': 'Preparing changes...', 'step': 4})
+        print("Getting workspace structure...")
+        structure = get_workspace_structure(workspace_dir)
+        
+        # Process each operation and generate diffs
+        print("Generating diffs for operations...")
+        for operation in suggestions.get('operations', []):
+            if operation.get('type') == 'edit_file':
+                file_path = operation.get('path')
+                if file_path in files_content:
+                    current_content = files_content[file_path]
+                    
+                    # If we have a changes array, apply each change
+                    if 'changes' in operation:
+                        new_content = current_content
+                        for change in operation['changes']:
+                            old_text = change.get('old', '')
+                            new_text = change.get('new', '')
+                            if old_text in new_content:  # Only replace if old text exists
+                                new_content = new_content.replace(old_text, new_text)
+                        operation['content'] = new_content
+                        
+                        # Generate diff directly from strings
+                        current_lines = current_content.splitlines()
+                        new_lines = new_content.splitlines()
+                        
+                        diff_lines = list(difflib.unified_diff(
+                            current_lines,
+                            new_lines,
+                            fromfile=f'a/{file_path}',
+                            tofile=f'b/{file_path}',
+                            lineterm=''
+                        ))
+                        
+                        if diff_lines:  # Only include diff if there are actual changes
+                            operation['diff'] = '\n'.join(diff_lines)
+                        else:
+                            # If no changes were made, mark this operation for removal
+                            operation['no_changes'] = True
+        
+        # Remove operations that didn't result in any changes
+        suggestions['operations'] = [op for op in suggestions['operations'] 
+                                  if not op.get('no_changes', False)]
+        
+        if not suggestions['operations']:
+            return jsonify({
+                'status': 'error',
+                'message': 'No valid changes to apply'
+            }), 400
+        
+        socketio.emit('status', {'message': 'Ready for review', 'step': 5})
+        return jsonify({
+            'status': 'success',
+            'explanation': suggestions.get('explanation', ''),
+            'operations': suggestions.get('operations', []),
+            'workspace_dir': workspace_dir,
+            'structure': structure,
+            'requires_approval': True
+        })
             
     except Exception as e:
         import traceback
@@ -1245,6 +1242,12 @@ def apply_approved_changes():
         
         structure = get_workspace_structure(workspace_dir)
         
+        # Notify all clients about the changes
+        socketio.emit('changes_applied', {
+            'workspace_id': workspace_id,
+            'modified_files': list(modified_files.keys())
+        })
+        
         return jsonify({
             'status': 'success',
             'message': 'Changes applied successfully',
@@ -1257,7 +1260,34 @@ def apply_approved_changes():
             'message': str(e)
         }), 500
 
+@app.context_processor
+def utility_processor():
+    """Add utility functions to template context"""
+    return {
+        'cache_buster': str(int(datetime.now().timestamp()))
+    }
+
 if __name__ == '__main__':
     # Initialize database before starting the app
     init_db()
-    app.run(debug=True) 
+    
+    # Watch static and template directories for changes
+    extra_files = []
+    for root, dirs, files in os.walk('static'):
+        for file in files:
+            path = os.path.join(root, file)
+            extra_files.append(path)
+    
+    for root, dirs, files in os.walk('templates'):
+        for file in files:
+            path = os.path.join(root, file)
+            extra_files.append(path)
+    
+    # Run with eventlet server and reloader enabled
+    socketio.run(
+        app,
+        debug=True,
+        extra_files=extra_files,
+        host='0.0.0.0',
+        port=5000
+    ) 
