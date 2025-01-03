@@ -48,7 +48,7 @@ AVAILABLE_MODELS = {
         }
     },
     'codestral-mamba': {
-        'name': 'Qwen 2.5 Coder',
+        'name': 'Codestral Mamba',
         'api_key_env': 'OPENROUTER_API_KEY',
         'client_class': OpenAI,
         'base_url': 'https://openrouter.ai/api/v1',
