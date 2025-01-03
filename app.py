@@ -487,9 +487,7 @@ IMPORTANT: Return the JSON object directly, not inside a code block."""
                     ],
                     stream=True,
                     max_tokens=4000,
-                    temperature=0.7,
-                    http_referer="https://github.com/danilofalcao",
-                    x_title="J.A.R.V.I.S."
+                    temperature=0.7
                 )
                 
                 response_chunks = []
@@ -517,9 +515,7 @@ IMPORTANT: Return the JSON object directly, not inside a code block."""
                     ],
                     stream=False,
                     max_tokens=4000,
-                    temperature=0.7,
-                    http_referer="https://github.com/danilofalcao",
-                    x_title="J.A.R.V.I.S."
+                    temperature=0.7
                 )
                 
                 if response.choices and response.choices[0].message.content:
