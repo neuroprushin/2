@@ -218,18 +218,23 @@ async function loadWorkspaceHistory() {
 
             data.history.forEach(workspace => {
                 const workspaceDiv = document.createElement('div');
-                workspaceDiv.className = 'workspace-item flex items-center justify-between p-3 hover:bg-gray-700 rounded-lg cursor-pointer transition-colors';
+                const isImported = workspace.is_imported;
+                workspaceDiv.className = `workspace-item flex items-center justify-between p-3 hover:bg-gray-700 rounded-lg cursor-pointer transition-colors ${isImported ? 'border-l-4 border-blue-500 bg-blue-900 bg-opacity-10' : ''}`;
                 
                 const infoDiv = document.createElement('div');
                 infoDiv.className = 'flex-1';
                 infoDiv.onclick = () => selectWorkspace(workspace.path);
                 
-                const nameSpan = document.createElement('span');
-                nameSpan.className = 'font-medium';
-                nameSpan.textContent = workspace.id;
+                const nameSpan = document.createElement('div');
+                nameSpan.className = 'flex items-center gap-2';
+                nameSpan.innerHTML = `
+                    <i class="fas fa-${isImported ? 'link' : 'folder'} ${isImported ? 'text-blue-400' : 'text-gray-400'}"></i>
+                    <span class="font-medium">${workspace.id}</span>
+                    ${isImported ? '<span class="text-xs text-blue-400">(Imported)</span>' : ''}
+                `;
                 
                 const statsSpan = document.createElement('span');
-                statsSpan.className = 'text-sm text-gray-400 block';
+                statsSpan.className = 'text-sm text-gray-400 block mt-1';
                 statsSpan.textContent = `${workspace.file_count} files`;
                 
                 infoDiv.appendChild(nameSpan);
@@ -238,29 +243,36 @@ async function loadWorkspaceHistory() {
                 const actionsDiv = document.createElement('div');
                 actionsDiv.className = 'flex items-center gap-2';
                 
-                const renameBtn = document.createElement('button');
-                renameBtn.className = 'p-2 text-blue-400 hover:text-blue-300 transition-colors';
-                renameBtn.innerHTML = '<i class="fas fa-edit"></i>';
-                renameBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    const newName = prompt('Enter new workspace name:', workspace.id);
-                    if (newName && newName !== workspace.id) {
-                        renameWorkspace(workspace.id, newName);
-                    }
-                };
+                // Only show rename button for non-imported workspaces
+                if (!isImported) {
+                    const renameBtn = document.createElement('button');
+                    renameBtn.className = 'p-2 text-blue-400 hover:text-blue-300 transition-colors';
+                    renameBtn.innerHTML = '<i class="fas fa-edit"></i>';
+                    renameBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        const newName = prompt('Enter new workspace name:', workspace.id);
+                        if (newName && newName !== workspace.id) {
+                            renameWorkspace(workspace.id, newName);
+                        }
+                    };
+                    actionsDiv.appendChild(renameBtn);
+                }
                 
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'p-2 text-red-400 hover:text-red-300 transition-colors';
-                deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+                deleteBtn.title = isImported ? 'Unlink workspace' : 'Delete workspace';
+                deleteBtn.innerHTML = `<i class="fas fa-${isImported ? 'unlink' : 'trash'}"></i>`;
                 deleteBtn.onclick = (e) => {
                     e.stopPropagation();
-                    if (confirm('Are you sure you want to delete this workspace?')) {
+                    const message = isImported 
+                        ? 'Are you sure you want to unlink this workspace? The original folder will remain unchanged.'
+                        : 'Are you sure you want to delete this workspace? This action cannot be undone.';
+                    if (confirm(message)) {
                         deleteWorkspace(workspace.id);
                     }
                 };
-                
-                actionsDiv.appendChild(renameBtn);
                 actionsDiv.appendChild(deleteBtn);
+                
                 workspaceDiv.appendChild(infoDiv);
                 workspaceDiv.appendChild(actionsDiv);
                 historyList.appendChild(workspaceDiv);
@@ -392,7 +404,6 @@ function createButton(iconClass, buttonClass, onClick) {
 
 async function selectWorkspace(path) {
     currentWorkspace = path;
-    updateWorkspaceInfo(path.split('/').pop());
     
     try {
         const response = await fetch('/workspace/structure', {
@@ -403,7 +414,23 @@ async function selectWorkspace(path) {
         
         const data = await response.json();
         if (data.status === 'success') {
-            updateWorkspaceTree(data.structure);
+            // Update workspace info
+            const workspaceInfo = document.getElementById('currentWorkspaceInfo');
+            if (workspaceInfo) {
+                workspaceInfo.classList.remove('hidden');
+            }
+            
+            const workspaceName = document.getElementById('currentWorkspaceName');
+            if (workspaceName) {
+                workspaceName.textContent = path.split('/').pop();
+            }
+            
+            // Update tree structure
+            const workspaceTree = document.getElementById('workspaceTree');
+            if (workspaceTree) {
+                workspaceTree.innerHTML = '';
+                buildTree(data.structure, workspaceTree);
+            }
         } else {
             showError('Failed to load workspace structure');
         }
@@ -414,110 +441,177 @@ async function selectWorkspace(path) {
 }
 
 function updateWorkspaceInfo(id) {
-    const info = document.getElementById('currentWorkspaceInfo');
-    const name = document.getElementById('currentWorkspaceName');
-    info.classList.remove('hidden');
-    name.textContent = id;
+    currentWorkspace = id;
+    const workspaceInfo = document.getElementById('workspaceInfo');
+    workspaceInfo.innerHTML = '';
+    
+    const title = document.createElement('h2');
+    title.textContent = 'Current Workspace';
+    
+    const idDisplay = document.createElement('p');
+    idDisplay.textContent = `ID: ${id}`;
+    
+    const importButton = document.createElement('button');
+    importButton.className = 'btn btn-primary';
+    importButton.innerHTML = '<i class="fas fa-folder-plus"></i> Import Folder';
+    importButton.onclick = importFolder;
+    
+    workspaceInfo.appendChild(title);
+    workspaceInfo.appendChild(idDisplay);
+    workspaceInfo.appendChild(importButton);
 }
 
 // File Tree Management
 function updateWorkspaceTree(structure) {
-    const treeContainer = document.getElementById('workspaceTree');
-    treeContainer.innerHTML = '';
-    buildTree(structure, treeContainer);
-}
-
-function buildTree(items, container, path = '') {
-    // Sort items by type (directories first) and name
-    const sortedItems = items.sort((a, b) => {
-        if (a.type !== b.type) {
-            return a.type === 'directory' ? -1 : 1;
-        }
-        return a.name.localeCompare(b.name);
-    });
-
-    // Get unique top-level items for current path
-    const currentLevelItems = sortedItems.filter(item => {
-        const relativePath = item.path.replace(path ? path + '/' : '', '');
-        return !relativePath.includes('/');
-    });
-
-    // Process directories first
-    currentLevelItems.forEach(item => {
-        const itemDiv = createTreeItem(item);
-        container.appendChild(itemDiv);
-
-        if (item.type === 'directory') {
-            const contentDiv = document.createElement('div');
-            contentDiv.className = 'directory-content';
-            contentDiv.style.display = 'none';
-
-            // Get children for this directory
-            const children = sortedItems.filter(child => 
-                child.path.startsWith(item.path + '/') &&
-                child.path !== item.path
-            );
-
-            if (children.length > 0) {
-                buildTree(children, contentDiv, item.path);
-                container.appendChild(contentDiv);
-
-                itemDiv.onclick = (e) => {
-                    e.stopPropagation();
-                    const icon = itemDiv.querySelector('i');
-                    if (contentDiv.style.display === 'none') {
-                        contentDiv.style.display = 'block';
-                        icon.className = 'fas fa-folder-open';
-                    } else {
-                        contentDiv.style.display = 'none';
-                        icon.className = 'fas fa-folder';
-                    }
-                };
-            }
-        }
-    });
-}
-
-function createTreeItem(item) {
-    const itemDiv = document.createElement('div');
-    itemDiv.className = 'file-tree-item';
-    
-    const icon = document.createElement('i');
-    icon.className = item.type === 'directory' ? 'fas fa-folder' : getFileIcon(item.name);
-    
-    const name = document.createElement('span');
-    name.textContent = item.name;
-    name.className = 'flex-1 truncate';
-    
-    itemDiv.appendChild(icon);
-    itemDiv.appendChild(name);
-    
-    if (item.type === 'file') {
-        itemDiv.onclick = (e) => {
-            e.stopPropagation();
-            showFileContent(item.path);
-        };
-        // Add hover effect for files
-        itemDiv.classList.add('hover:bg-gray-700', 'cursor-pointer');
+    const workspaceTree = document.getElementById('workspaceTree');
+    if (workspaceTree) {
+        workspaceTree.innerHTML = '';
+        buildTree(structure, workspaceTree);
     }
-    
-    return itemDiv;
+}
+
+function buildTree(structure, parentElement) {
+    for (const item of structure) {
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'tree-item';
+        
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'icon';
+        
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'name';
+        nameSpan.textContent = item.name;
+        
+        if (item.type === 'directory') {
+            iconSpan.innerHTML = '<i class="fas fa-folder"></i>';
+            itemDiv.classList.add('folder');
+            
+            const childrenDiv = document.createElement('div');
+            childrenDiv.className = 'children hidden';
+            
+            itemDiv.onclick = (event) => {
+                event.stopPropagation();
+                // Remove selected class from all items
+                document.querySelectorAll('.tree-item').forEach(item => item.classList.remove('selected'));
+                // Add selected class to clicked item
+                itemDiv.classList.add('selected');
+                
+                childrenDiv.classList.toggle('hidden');
+                const icon = iconSpan.querySelector('i');
+                if (icon) {
+                    icon.classList.toggle('fa-folder');
+                    icon.classList.toggle('fa-folder-open');
+                }
+            };
+            
+            if (item.children && item.children.length > 0) {
+                buildTree(item.children, childrenDiv);
+            }
+            
+            itemDiv.appendChild(iconSpan);
+            itemDiv.appendChild(nameSpan);
+            itemDiv.appendChild(childrenDiv);
+        } else {
+            itemDiv.classList.add('file');
+            iconSpan.innerHTML = getFileIcon(item.name);
+            
+            itemDiv.onclick = (event) => {
+                event.stopPropagation();
+                // Remove selected class from all items
+                document.querySelectorAll('.tree-item').forEach(item => item.classList.remove('selected'));
+                // Add selected class to clicked item
+                itemDiv.classList.add('selected');
+                showFileContent(item.path);
+            };
+            
+            itemDiv.appendChild(iconSpan);
+            itemDiv.appendChild(nameSpan);
+        }
+        
+        parentElement.appendChild(itemDiv);
+    }
 }
 
 function getFileIcon(filename) {
     const ext = filename.split('.').pop().toLowerCase();
     const iconMap = {
+        // Programming Languages
         'js': 'fab fa-js text-yellow-400',
         'py': 'fab fa-python text-blue-400',
         'html': 'fab fa-html5 text-orange-500',
         'css': 'fab fa-css3-alt text-blue-500',
-        'json': 'fas fa-code text-green-400',
-        'md': 'fas fa-file-alt text-purple-400',
-        'txt': 'fas fa-file-alt text-gray-400',
+        'jsx': 'fab fa-react text-blue-400',
+        'tsx': 'fab fa-react text-blue-400',
+        'vue': 'fab fa-vuejs text-green-400',
+        'php': 'fab fa-php text-purple-400',
+        'rb': 'fas fa-gem text-red-400',
+        'java': 'fab fa-java text-red-400',
+        'kt': 'fas fa-k text-purple-400',
+        'swift': 'fab fa-swift text-orange-400',
+        'go': 'fas fa-code text-blue-400',
+        'rs': 'fas fa-gear text-orange-400',
+        
+        // Web and Config Files
+        'json': 'fas fa-code text-yellow-400',
+        'xml': 'fas fa-code text-orange-400',
+        'yaml': 'fas fa-file-code text-red-400',
         'yml': 'fas fa-file-code text-red-400',
-        'yaml': 'fas fa-file-code text-red-400'
+        'toml': 'fas fa-file-code text-blue-400',
+        'md': 'fas fa-file-alt text-blue-400',
+        'txt': 'fas fa-file-alt text-gray-400',
+        
+        // Shell Scripts
+        'sh': 'fas fa-terminal text-green-400',
+        'bash': 'fas fa-terminal text-green-400',
+        'zsh': 'fas fa-terminal text-green-400',
+        'fish': 'fas fa-terminal text-green-400',
+        
+        // Database
+        'sql': 'fas fa-database text-blue-400',
+        'sqlite': 'fas fa-database text-blue-400',
+        'db': 'fas fa-database text-blue-400',
+        
+        // Images
+        'jpg': 'fas fa-file-image text-green-400',
+        'jpeg': 'fas fa-file-image text-green-400',
+        'png': 'fas fa-file-image text-green-400',
+        'gif': 'fas fa-file-image text-green-400',
+        'svg': 'fas fa-file-image text-green-400',
+        'webp': 'fas fa-file-image text-green-400',
+        
+        // Documents
+        'pdf': 'fas fa-file-pdf text-red-400',
+        'doc': 'fas fa-file-word text-blue-400',
+        'docx': 'fas fa-file-word text-blue-400',
+        'xls': 'fas fa-file-excel text-green-400',
+        'xlsx': 'fas fa-file-excel text-green-400',
+        'ppt': 'fas fa-file-powerpoint text-orange-400',
+        'pptx': 'fas fa-file-powerpoint text-orange-400',
+        
+        // Archives
+        'zip': 'fas fa-file-archive text-yellow-400',
+        'rar': 'fas fa-file-archive text-yellow-400',
+        '7z': 'fas fa-file-archive text-yellow-400',
+        'tar': 'fas fa-file-archive text-yellow-400',
+        'gz': 'fas fa-file-archive text-yellow-400',
+        
+        // Development
+        'gitignore': 'fab fa-git-alt text-orange-400',
+        'env': 'fas fa-key text-green-400',
+        'lock': 'fas fa-lock text-yellow-400',
+        'log': 'fas fa-file-alt text-gray-400',
+        'conf': 'fas fa-cog text-gray-400',
+        'config': 'fas fa-cog text-gray-400'
     };
-    return iconMap[ext] || 'fas fa-file text-blue-400';
+    
+    // Check for specific filenames first
+    if (filename === '.gitignore') return '<i class="fab fa-git-alt text-orange-400 text-xl"></i>';
+    if (filename === '.env') return '<i class="fas fa-key text-green-400 text-xl"></i>';
+    if (filename.endsWith('.lock')) return '<i class="fas fa-lock text-yellow-400 text-xl"></i>';
+    if (filename.endsWith('.config')) return '<i class="fas fa-cog text-gray-400 text-xl"></i>';
+    
+    // Then check extensions
+    return `<i class="${iconMap[ext] || 'fas fa-file text-gray-400'} text-xl"></i>`;
 }
 
 // Code Generation
@@ -980,8 +1074,34 @@ function hideModal() {
     }
 }
 
-function showError(message) {
-    alert(message);
+function showError(message, type = 'error') {
+    // Remove any existing notifications
+    const existingNotification = document.getElementById('notification');
+    if (existingNotification) {
+        existingNotification.remove();
+    }
+
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.id = 'notification';
+    notification.className = `fixed bottom-4 right-4 p-4 rounded-lg shadow-lg z-50 ${
+        type === 'success' ? 'bg-green-500' : 'bg-red-500'
+    } text-white`;
+    
+    notification.innerHTML = `
+        <div class="flex items-center gap-2">
+            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+            <span>${message}</span>
+        </div>
+    `;
+
+    // Add to document
+    document.body.appendChild(notification);
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
 }
 
 function validateWorkspace() {
@@ -1045,7 +1165,7 @@ async function showFileContent(filePath) {
     const modalTitle = modal.querySelector('.modal-header h2');
     const modalFooter = modal.querySelector('.modal-footer .flex');
 
-    modalTitle.textContent = 'File Content';
+    modalTitle.textContent = filePath.split('/').pop();
     preview.innerHTML = '<div class="text-center p-4"><i class="fas fa-spinner fa-spin mr-2"></i>Loading file...</div>';
     modalFooter.innerHTML = '';
     modal.classList.remove('hidden');
@@ -1065,9 +1185,13 @@ async function showFileContent(filePath) {
         if (data.status === 'success') {
             preview.innerHTML = '';
 
-            // File info header with size information
+            // Create the main container
+            const container = document.createElement('div');
+            container.className = 'file-preview-container';
+            
+            // File info header
             const fileInfo = document.createElement('div');
-            fileInfo.className = 'flex items-center gap-3 mb-6 p-4 bg-gray-700 rounded-lg';
+            fileInfo.className = 'file-info-header';
             
             const fileSize = formatFileSize(data.file_size);
             const truncatedWarning = data.truncated 
@@ -1075,35 +1199,52 @@ async function showFileContent(filePath) {
                 : `<p class="text-gray-400 text-sm mt-1">File size: ${fileSize}</p>`;
             
             fileInfo.innerHTML = `
-                <i class="${getFileIcon(filePath)} text-xl"></i>
-                <div>
-                    <h3 class="text-lg font-medium">${filePath.split('/').pop()}</h3>
-                    <p class="text-sm text-gray-400">${filePath}</p>
-                    ${truncatedWarning}
+                <div class="flex items-center gap-3">
+                    ${getFileIcon(filePath)}
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-lg font-medium">${filePath.split('/').pop()}</h3>
+                        </div>
+                        <p class="text-sm text-gray-400">${filePath}</p>
+                        ${truncatedWarning}
+                    </div>
                 </div>
             `;
-            preview.appendChild(fileInfo);
+            container.appendChild(fileInfo);
 
-            // Code content
-            const codeDiv = document.createElement('div');
-            codeDiv.className = 'bg-gray-900 rounded-lg p-4 font-mono text-sm whitespace-pre overflow-x-auto';
+            // File content container
+            const contentContainer = document.createElement('div');
+            contentContainer.className = 'file-content-container';
             
-            // Clean up the content
-            let code = data.content.trim()
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-                
-            // Get language for syntax highlighting
-            const language = getLanguageMode(filePath);
-            codeDiv.innerHTML = `<code class="language-${language}">${code}</code>`;
-            preview.appendChild(codeDiv);
+            // Create editor
+            const editorDiv = document.createElement('div');
+            editorDiv.style.height = '100%';
+            
+            const textarea = document.createElement('textarea');
+            textarea.value = data.content;
+            editorDiv.appendChild(textarea);
+            contentContainer.appendChild(editorDiv);
+            container.appendChild(contentContainer);
+            
+            preview.appendChild(container);
+
+            // Initialize CodeMirror
+            CodeMirror.fromTextArea(textarea, {
+                mode: getLanguageMode(filePath),
+                theme: 'monokai',
+                lineNumbers: true,
+                matchBrackets: true,
+                styleActiveLine: true,
+                readOnly: true,
+                scrollbarStyle: 'overlay',
+                lineWrapping: true,
+                viewportMargin: Infinity
+            });
 
             // Add close button
             const closeBtn = document.createElement('button');
             closeBtn.className = 'btn btn-secondary';
-            closeBtn.textContent = 'Close';
+            closeBtn.innerHTML = '<i class="fas fa-times mr-2"></i>Close';
             closeBtn.onclick = hideModal;
             modalFooter.appendChild(closeBtn);
         } else {
@@ -1362,4 +1503,180 @@ document.getElementById('codeAttachment').addEventListener('change', function() 
 
 document.getElementById('chatAttachment').addEventListener('change', function() {
     handleFileAttachment(this, document.getElementById('chatAttachments'));
-}); 
+});
+
+async function importFolder() {
+    await showFolderBrowser();
+}
+
+async function showFolderBrowser(path = null) {
+    try {
+        const modal = document.getElementById('approvalModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const preview = document.getElementById('changesPreview');
+        const footer = document.getElementById('modalFooter');
+        
+        if (!modal || !modalTitle || !preview || !footer) {
+            throw new Error('Modal elements not found');
+        }
+
+        showLoading('Loading folders...');
+        const response = await fetch(`/available-folders${path ? `?path=${encodeURIComponent(path)}` : ''}`);
+        const data = await response.json();
+        
+        if (data.status !== 'success') {
+            throw new Error(data.message || 'Failed to load folders');
+        }
+        
+        modalTitle.textContent = 'Browse Folders';
+        preview.innerHTML = `
+            <div class="p-4 mb-4 bg-blue-900 bg-opacity-20 rounded-lg">
+                <p class="text-sm text-blue-300">
+                    <i class="fas fa-info-circle mr-2"></i>
+                    Browse to find a folder to import. Click on any folder to navigate into it, or click "Import" when you find the folder you want.
+                </p>
+            </div>
+            <div class="px-4 py-2 bg-gray-800 rounded-lg mb-4 flex items-center gap-2 text-sm">
+                <i class="fas fa-folder-open text-blue-400"></i>
+                <span class="text-gray-300">${data.current_path}</span>
+            </div>
+        `;
+        footer.innerHTML = '';
+        
+        // Create folder list
+        const folderList = document.createElement('div');
+        folderList.className = 'grid grid-cols-1 gap-2';
+        
+        // Add parent directory navigation if available
+        if (data.parent_path) {
+            const parentDiv = document.createElement('div');
+            parentDiv.className = 'flex items-center p-3 bg-gray-700 rounded-lg hover:bg-gray-600 cursor-pointer transition-colors';
+            parentDiv.onclick = () => showFolderBrowser(data.parent_path);
+            parentDiv.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-level-up-alt text-gray-400"></i>
+                    <span class="font-medium text-gray-300">Parent Directory</span>
+                </div>
+            `;
+            folderList.appendChild(parentDiv);
+        }
+        
+        // Add folders
+        data.items.forEach(item => {
+            const folderDiv = document.createElement('div');
+            folderDiv.className = 'flex items-center justify-between p-3 bg-gray-700 rounded-lg hover:bg-gray-600 cursor-pointer transition-colors';
+            
+            // Make all folders navigable
+            folderDiv.onclick = () => showFolderBrowser(item.path);
+            
+            const info = document.createElement('div');
+            info.className = 'flex-1';
+            
+            let details = '';
+            if (item.is_importable) {
+                details = `
+                    <div class="text-sm text-gray-400 mt-1">
+                        ${item.files} files · ${formatFileSize(item.size)} · 
+                        Modified: ${new Date(item.modified * 1000).toLocaleString()}
+                    </div>
+                `;
+            }
+            
+            info.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-folder${item.is_importable ? '' : '-open'} text-${item.is_importable ? 'blue' : 'gray'}-400"></i>
+                    <span class="font-medium text-gray-300">${item.name}</span>
+                </div>
+                ${details}
+            `;
+            
+            folderDiv.appendChild(info);
+            
+            // Add import button for importable folders
+            if (item.is_importable) {
+                const importBtn = document.createElement('button');
+                importBtn.className = 'btn btn-primary btn-sm ml-4';
+                importBtn.innerHTML = '<i class="fas fa-download mr-1"></i> Import';
+                importBtn.onclick = (e) => {
+                    e.stopPropagation();  // Prevent folder navigation
+                    selectFolderToImport({ ...item, path: item.path });
+                };
+                folderDiv.appendChild(importBtn);
+            } else {
+                // Add navigation arrow for all folders
+                const arrow = document.createElement('div');
+                arrow.innerHTML = '<i class="fas fa-chevron-right text-gray-400"></i>';
+                folderDiv.appendChild(arrow);
+            }
+            
+            folderList.appendChild(folderDiv);
+        });
+        
+        preview.appendChild(folderList);
+        
+        // Add close button
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'btn btn-secondary';
+        closeBtn.textContent = 'Cancel';
+        closeBtn.onclick = hideModal;
+        footer.appendChild(closeBtn);
+        
+        modal.classList.remove('hidden');
+    } catch (error) {
+        console.error('Error in showFolderBrowser:', error);
+        showError(error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
+async function selectFolderToImport(folder) {
+    try {
+        hideModal(); // Hide modal first
+        showLoading('Importing folder as workspace...');
+        
+        const response = await fetch('/workspace/import-folder', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                path: folder.path
+            })
+        });
+        
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to import folder');
+        }
+        
+        // First update workspace info
+        currentWorkspace = data.workspace_dir;
+        
+        // Then update the workspace history to ensure all elements are created
+        await loadWorkspaceHistory();
+        
+        // Now update the current workspace info and tree
+        const workspaceInfo = document.getElementById('currentWorkspaceInfo');
+        if (workspaceInfo) {
+            workspaceInfo.classList.remove('hidden');
+        }
+        
+        const workspaceName = document.getElementById('currentWorkspaceName');
+        if (workspaceName) {
+            workspaceName.textContent = data.workspace_id;
+        }
+        
+        const workspaceTree = document.getElementById('workspaceTree');
+        if (workspaceTree) {
+            updateWorkspaceTree(data.structure);
+        }
+        
+        showError('Folder imported successfully', 'success');
+    } catch (error) {
+        console.error('Error importing folder:', error);
+        showError(error.message);
+    } finally {
+        hideLoading();
+    }
+} 

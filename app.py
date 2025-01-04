@@ -169,15 +169,19 @@ def get_workspace_history():
                 # Exclude hidden files
                 file_count += sum(1 for f in files if not f.startswith('.'))
             
+            # Check if this is an imported workspace
+            is_imported = os.path.exists(os.path.join(workspace_path, '.imported'))
+            
             workspaces.append({
                 'id': item,
                 'path': workspace_path,
                 'created_at': created_at.isoformat(),
-                'file_count': file_count
+                'file_count': file_count,
+                'is_imported': is_imported
             })
     
-    # Sort by creation time, newest first
-    return sorted(workspaces, key=lambda x: x['created_at'], reverse=True)
+    # Sort alphabetically by ID, case-insensitive
+    return sorted(workspaces, key=lambda x: x['id'].lower())
 
 def delete_workspace(workspace_id):
     """Delete a workspace"""
@@ -188,50 +192,63 @@ def delete_workspace(workspace_id):
         if not os.path.abspath(workspace_path).startswith(os.path.abspath(WORKSPACE_ROOT)):
             raise Exception("Invalid workspace path")
         
-        # Delete directory
-        try:
-            if os.path.exists(workspace_path):
-                shutil.rmtree(workspace_path, ignore_errors=False)
-            if os.path.exists(workspace_path):
-                raise Exception("Failed to delete workspace directory")
-        except Exception as e:
-            raise Exception(f"Failed to delete workspace directory: {str(e)}")
+        # Check if it's an imported workspace
+        if os.path.exists(os.path.join(workspace_path, '.imported')):
+            # Just remove the symlink and .imported file
+            os.remove(os.path.join(workspace_path, '.imported'))
+            os.unlink(workspace_path)
+        else:
+            # Delete directory for regular workspaces
+            try:
+                if os.path.exists(workspace_path):
+                    shutil.rmtree(workspace_path, ignore_errors=False)
+                if os.path.exists(workspace_path):
+                    raise Exception("Failed to delete workspace directory")
+            except Exception as e:
+                raise Exception(f"Failed to delete workspace directory: {str(e)}")
         
         return True
     except Exception as e:
         raise Exception(f"Failed to delete workspace: {str(e)}")
 
 def get_workspace_structure(workspace_dir):
-    """Get the folder structure of the workspace"""
     structure = []
     
+    # Check if this is an imported workspace
+    is_imported = os.path.exists(os.path.join(workspace_dir, '.imported'))
+    
     for root, dirs, files in os.walk(workspace_dir):
-        # Get relative path
         rel_path = os.path.relpath(root, workspace_dir)
         if rel_path == '.':
             rel_path = ''
             
-        # Add directories
-        for dir_name in dirs:
-            if not dir_name.startswith('.'):  # Skip hidden directories
-                full_path = os.path.join(rel_path, dir_name)
-                structure.append({
-                    'type': 'directory',
-                    'path': full_path,
-                    'name': dir_name
-                })
+        # Skip hidden directories and files
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        files = [f for f in files if not f.startswith('.')]
+        
+        for name in dirs:
+            full_path = os.path.join(root, name)
+            rel_full_path = os.path.relpath(full_path, workspace_dir)
             
-        # Add files
-        for file_name in files:
-            if not file_name.startswith('.'):  # Skip hidden files
-                full_path = os.path.join(rel_path, file_name)
-                structure.append({
-                    'type': 'file',
-                    'path': full_path,
-                    'name': file_name
-                })
+            structure.append({
+                'name': name,
+                'type': 'directory',
+                'path': rel_full_path.replace('\\', '/'),
+                'imported': is_imported  # Mark all folders as imported if workspace is imported
+            })
+            
+        for name in files:
+            full_path = os.path.join(root, name)
+            rel_full_path = os.path.relpath(full_path, workspace_dir)
+            
+            structure.append({
+                'name': name,
+                'type': 'file',
+                'path': rel_full_path.replace('\\', '/'),
+                'size': get_file_size(full_path)
+            })
     
-    return sorted(structure, key=lambda x: (x['type'] == 'file', x['path']))
+    return structure
 
 def get_file_size(file_path):
     """Get the size of a file in bytes"""
@@ -981,6 +998,19 @@ def apply_changes(suggestions, workspace_dir):
                     
                     # Run appropriate linter
                     operation['linter_status'] = run_linter(file_path)
+
+                elif operation['type'] == 'rename_file':
+                    old_path = os.path.join(workspace_dir, operation['path'])
+                    new_path = os.path.join(workspace_dir, operation['new_path'])
+                    
+                    # Create target directory if it doesn't exist
+                    os.makedirs(os.path.dirname(new_path), exist_ok=True)
+                    
+                    # Rename the file
+                    os.rename(old_path, new_path)
+                    
+                    # No linting needed for rename operations
+                    operation['linter_status'] = True
                 
                 results.append({
                     'status': 'success',
@@ -1117,6 +1147,169 @@ IMPORTANT: Return the JSON object directly, not inside a code block."""
         socketio.emit('status', {'message': f'Error: {str(e)}', 'step': -1})
         print(f"\nError getting code suggestion: {str(e)}")
         raise
+
+@app.route('/workspace/import-folder', methods=['POST'])
+def import_folder():
+    try:
+        data = request.get_json()
+        source_path = data.get('path')
+        
+        if not source_path:
+            return jsonify({'error': 'Missing source path'}), 400
+            
+        # Use the folder name as the workspace ID
+        workspace_id = os.path.basename(source_path)
+        workspace_dir = os.path.join(WORKSPACE_ROOT, workspace_id)
+        
+        # Check if workspace already exists
+        if os.path.exists(workspace_dir):
+            return jsonify({'error': 'A workspace with this name already exists'}), 400
+            
+        # Create symlink instead of copying
+        os.symlink(source_path, workspace_dir, target_is_directory=True)
+        
+        # Create a .imported flag file to mark this as an imported workspace
+        with open(os.path.join(workspace_dir, '.imported'), 'w') as f:
+            json.dump({
+                'source_path': source_path,
+                'imported_at': datetime.now().isoformat()
+            }, f)
+        
+        # Get the workspace structure
+        structure = get_workspace_structure(workspace_dir)
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Folder imported as workspace successfully',
+            'workspace_id': workspace_id,
+            'workspace_dir': workspace_dir,
+            'structure': structure
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/available-folders', methods=['GET'])
+def list_available_folders():
+    """List folders available for import from user's home directory"""
+    try:
+        # Get user's home directory
+        home_dir = os.path.expanduser('~')
+        path = request.args.get('path', home_dir)
+        
+        # Ensure the path is within home directory for security
+        if not os.path.abspath(path).startswith(os.path.abspath(home_dir)):
+            return jsonify({'error': 'Access denied: Path outside home directory'}), 403
+            
+        # Get parent path for navigation
+        parent_path = os.path.dirname(path) if path != home_dir else None
+        
+        available_items = []
+        try:
+            for item in os.listdir(path):
+                full_path = os.path.join(path, item)
+                if os.path.isdir(full_path):
+                    try:
+                        stats = os.stat(full_path)
+                        item_info = {
+                            'name': item,
+                            'path': full_path,
+                            'type': 'directory',
+                            'modified': stats.st_mtime,
+                            'is_navigable': True
+                        }
+                        # Only calculate size and files count if this is a potential import target
+                        if not item.startswith('.'):
+                            try:
+                                item_info.update({
+                                    'size': sum(os.path.getsize(os.path.join(dirpath,filename)) 
+                                              for dirpath, dirnames, filenames in os.walk(full_path)
+                                              for filename in filenames),
+                                    'files': sum(len(files) for _, _, files in os.walk(full_path)),
+                                    'is_importable': True
+                                })
+                            except:
+                                item_info.update({
+                                    'size': 0,
+                                    'files': 0,
+                                    'is_importable': False
+                                })
+                        available_items.append(item_info)
+                    except Exception as e:
+                        print(f"Error processing folder {item}: {e}")
+                        continue
+        except PermissionError:
+            return jsonify({
+                'error': 'Permission denied accessing this directory'
+            }), 403
+        
+        return jsonify({
+            'status': 'success',
+            'current_path': path,
+            'parent_path': parent_path,
+            'items': sorted(available_items, key=lambda x: (not x.get('is_importable', False), x['name'].lower()))
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/workspace/rename_file', methods=['POST'])
+def rename_file():
+    """Rename a file within a workspace"""
+    try:
+        data = request.json
+        workspace_dir = data.get('workspace_dir')
+        old_path = data.get('old_path')
+        new_path = data.get('new_path')
+        
+        if not all([workspace_dir, old_path, new_path]):
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing required parameters'
+            }), 400
+        
+        # Ensure paths are within workspace
+        old_full_path = os.path.abspath(os.path.join(workspace_dir, old_path))
+        new_full_path = os.path.abspath(os.path.join(workspace_dir, new_path))
+        
+        if not all(p.startswith(os.path.abspath(workspace_dir)) for p in [old_full_path, new_full_path]):
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid file path'
+            }), 400
+        
+        # Check if source exists and target doesn't
+        if not os.path.exists(old_full_path):
+            return jsonify({
+                'status': 'error',
+                'message': 'Source file not found'
+            }), 404
+            
+        if os.path.exists(new_full_path):
+            return jsonify({
+                'status': 'error',
+                'message': 'Target file already exists'
+            }), 400
+        
+        # Create target directory if it doesn't exist
+        os.makedirs(os.path.dirname(new_full_path), exist_ok=True)
+        
+        # Rename the file
+        os.rename(old_full_path, new_full_path)
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'File renamed successfully'
+        })
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 if __name__ == '__main__':
     # Watch static and template directories for changes
