@@ -1,0 +1,56 @@
+.tree-item {
+    display: flex;
+    align-items: center;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.tree-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.tree-item .icon {
+    margin-right: 8px;
+    position: relative;
+}
+
+.tree-item.imported-folder {
+    background-color: rgba(0, 128, 255, 0.1);
+    border-left: 3px solid #0080ff;
+}
+
+.import-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background-color: #0080ff;
+    color: white;
+    border-radius: 50%;
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+}
+
+.import-badge i {
+    font-size: 8px;
+}
+
+.btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-colors;
+}
+
+.btn-primary {
+    @apply bg-blue-500 text-white hover:bg-blue-600;
+}
+
+.btn-secondary {
+    @apply bg-gray-600 text-white hover:bg-gray-700;
+}
+
+.btn-sm {
+    @apply px-2 py-1 text-sm;
+} 
