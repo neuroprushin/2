@@ -574,23 +574,39 @@ def get_file_content():
         file_path = data.get('file_path')
         
         if not workspace_dir or not file_path:
-            return jsonify({'error': 'Missing workspace_dir or file_path'}), 400
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing workspace_dir or file_path'
+            }), 400
+            
+        # Validate workspace directory
+        if not os.path.exists(workspace_dir):
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid workspace directory'
+            }), 400
             
         # Validate file path to prevent directory traversal
         if '..' in file_path or file_path.startswith('/'):
-            return jsonify({'error': 'Invalid file path'}), 400
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid file path'
+            }), 400
             
         # Ensure the file is within the workspace
         full_path = os.path.abspath(os.path.join(workspace_dir, file_path))
         if not full_path.startswith(os.path.abspath(workspace_dir)):
-            return jsonify({'error': 'File path not within workspace'}), 400
+            return jsonify({
+                'status': 'error',
+                'message': 'File path not within workspace'
+            }), 400
             
         full_path = os.path.join(workspace_dir, file_path)
         if not os.path.exists(full_path):
             return jsonify({
-                'status': 'success',
-                'content': ''  # Return empty content for new files
-            })
+                'status': 'error',
+                'message': 'File not found'
+            }), 404
         
         # Check if it's a large file
         if is_large_file(full_path):
