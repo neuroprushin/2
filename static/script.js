@@ -442,23 +442,16 @@ async function selectWorkspace(path) {
 
 function updateWorkspaceInfo(id) {
     currentWorkspace = id;
-    const workspaceInfo = document.getElementById('workspaceInfo');
-    workspaceInfo.innerHTML = '';
+    const workspaceInfo = document.getElementById('currentWorkspaceInfo');
+    const workspaceName = document.getElementById('currentWorkspaceName');
     
-    const title = document.createElement('h2');
-    title.textContent = 'Current Workspace';
+    if (workspaceInfo) {
+        workspaceInfo.classList.remove('hidden');
+    }
     
-    const idDisplay = document.createElement('p');
-    idDisplay.textContent = `ID: ${id}`;
-    
-    const importButton = document.createElement('button');
-    importButton.className = 'btn btn-primary';
-    importButton.innerHTML = '<i class="fas fa-folder-plus"></i> Import Folder';
-    importButton.onclick = importFolder;
-    
-    workspaceInfo.appendChild(title);
-    workspaceInfo.appendChild(idDisplay);
-    workspaceInfo.appendChild(importButton);
+    if (workspaceName) {
+        workspaceName.textContent = id;
+    }
 }
 
 // File Tree Management
