@@ -827,26 +827,29 @@ function appendOperation(container, operation) {
 }
 
 function appendOperationHeader(container, operation) {
-    const headerDiv = document.createElement('div');
-    headerDiv.className = 'flex items-center gap-3 mb-4';
-
+    const header = document.createElement('div');
+    header.className = 'operation-header flex items-center gap-2 mb-2';
+    
+    // Icon based on operation type
     const icon = document.createElement('i');
-    icon.className = 'fas fa-2x ' + getOperationIcon(operation.type);
-
-    const titleDiv = document.createElement('div');
-    const title = document.createElement('h3');
-    title.className = 'text-lg font-medium';
+    icon.className = getOperationIcon(operation.type);
+    header.appendChild(icon);
+    
+    // Operation title
+    const title = document.createElement('span');
+    title.className = 'font-medium';
     title.textContent = formatOperationTitle(operation);
+    header.appendChild(title);
 
-    const subtitle = document.createElement('p');
-    subtitle.className = 'text-sm text-gray-400';
-    subtitle.textContent = operation.explanation || '';
+    // Add linter status icon if available
+    if (operation.linter_status !== undefined) {
+        const linterIcon = document.createElement('i');
+        linterIcon.className = operation.linter_status ? 'fas fa-check-circle text-green-500 ml-2' : 'fas fa-exclamation-circle text-red-500 ml-2';
+        linterIcon.title = operation.linter_status ? 'Linter passed' : 'Linter failed';
+        header.appendChild(linterIcon);
+    }
 
-    titleDiv.appendChild(title);
-    titleDiv.appendChild(subtitle);
-    headerDiv.appendChild(icon);
-    headerDiv.appendChild(titleDiv);
-    container.appendChild(headerDiv);
+    container.appendChild(header);
 }
 
 function getOperationIcon(type) {

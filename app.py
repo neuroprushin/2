@@ -3,6 +3,7 @@ eventlet.monkey_patch()
 
 from flask import Flask, render_template, request, jsonify, send_from_directory
 import os
+import tempfile
 from dotenv import load_dotenv
 from openai import OpenAI
 from anthropic import Anthropic
@@ -481,9 +482,20 @@ def process_prompt():
         structure = get_workspace_structure(workspace_dir)
         
         # Process each operation and generate diffs
-        print("Generating diffs for operations...")
+        print("Running linters and generating diffs...")
         for operation in suggestions.get('operations', []):
-            if operation.get('type') == 'edit_file':
+            # Run linter on temporary file for new files
+            if operation.get('type') == 'create_file':
+                tmp = tempfile.NamedTemporaryFile(suffix=os.path.splitext(operation['path'])[1], mode='w', delete=False)
+                try:
+                    tmp.write(operation['content'])
+                    tmp.close()
+                    operation['linter_status'] = run_linter(tmp.name)
+                finally:
+                    os.unlink(tmp.name)
+            
+            # Run linter on modified content for edited files
+            elif operation.get('type') == 'edit_file':
                 file_path = operation.get('path')
                 if file_path in files_content:
                     current_content = files_content[file_path]
@@ -498,22 +510,36 @@ def process_prompt():
                                 new_content = new_content.replace(old_text, new_text)
                         operation['content'] = new_content
                         
-                        # Generate diff directly from strings
-                        current_lines = current_content.splitlines()
-                        new_lines = new_content.splitlines()
+                        # Run linter on the entire new content first
+                        tmp = tempfile.NamedTemporaryFile(suffix=os.path.splitext(file_path)[1], mode='w', delete=False)
+                        try:
+                            tmp.write(new_content)
+                            tmp.close()
+                            operation['linter_status'] = run_linter(tmp.name)
+                        finally:
+                            os.unlink(tmp.name)
                         
-                        diff_lines = list(difflib.unified_diff(
-                            current_lines,
-                            new_lines,
-                            fromfile=f'a/{file_path}',
-                            tofile=f'b/{file_path}',
-                            lineterm=''
-                        ))
-                        
-                        if diff_lines:  # Only include diff if there are actual changes
-                            operation['diff'] = '\n'.join(diff_lines)
+                        # Only generate diff if linting passed
+                        if operation['linter_status']:
+                            # Generate diff directly from strings
+                            current_lines = current_content.splitlines()
+                            new_lines = new_content.splitlines()
+                            
+                            diff_lines = list(difflib.unified_diff(
+                                current_lines,
+                                new_lines,
+                                fromfile=f'a/{file_path}',
+                                tofile=f'b/{file_path}',
+                                lineterm=''
+                            ))
+                            
+                            if diff_lines:  # Only include diff if there are actual changes
+                                operation['diff'] = '\n'.join(diff_lines)
+                            else:
+                                # If no changes were made, mark this operation for removal
+                                operation['no_changes'] = True
                         else:
-                            # If no changes were made, mark this operation for removal
+                            # If linting failed, mark this operation for removal
                             operation['no_changes'] = True
         
         # Remove operations that didn't result in any changes
@@ -812,17 +838,21 @@ def apply_approved_changes():
             return jsonify({'error': 'Invalid workspace directory'}), 400
         
         # Apply the changes
-        modified_files = apply_changes({
+        results = apply_changes({
             'operations': operations
         }, workspace_dir)
         
         structure = get_workspace_structure(workspace_dir)
         
+        # Get list of modified files from results
+        modified_files = [result['operation']['path'] for result in results 
+                         if result['status'] == 'success']
+        
         # Notify all clients about the changes
         workspace_id = os.path.basename(workspace_dir)
         socketio.emit('changes_applied', {
             'workspace_id': workspace_id,
-            'modified_files': list(modified_files.keys())
+            'modified_files': modified_files
         })
         
         return jsonify({
@@ -889,131 +919,81 @@ def analyze_dependencies(files_content):
     
     return dependencies
 
-def apply_changes(suggestions, workspace_dir):
-    """Apply code changes based on the operations in the response"""
+def run_linter(file_path):
+    """Run pylama for multi-language linting support"""
     try:
-        modified_files = {}
+        import subprocess
+        from pathlib import Path
         
-        # Validate workspace directory
-        if not os.path.exists(workspace_dir) or not os.path.isdir(workspace_dir):
-            raise ValueError('Invalid workspace directory')
-            
-        # Get the explanation for the overall changes
-        overall_explanation = suggestions.get('explanation', 'Changes requested by user')
+        # Get file extension
+        file_ext = Path(file_path).suffix.lower()
         
-        # Validate operations
-        if not isinstance(suggestions.get('operations'), list):
-            raise ValueError('Invalid operations format')
+        # Skip binary or non-code files
+        binary_extensions = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin', '.jpg', '.png', '.gif'}
+        if file_ext in binary_extensions:
+            return True
         
-        # Process each operation
-        for operation in suggestions.get('operations', []):
-            op_type = operation.get('type')
-            path = operation.get('path')
-            if not path:
-                continue
+        # Run pylama directly as a subprocess
+        result = subprocess.run(['pylama', file_path], capture_output=True, text=True)
+        
+        # Return True if no issues found (exit code 0)
+        return result.returncode == 0
+        
+    except Exception as e:
+        print(f"Linting error for {file_path}: {str(e)}")
+        return False
+
+def apply_changes(suggestions, workspace_dir):
+    """Apply the suggested changes to the workspace"""
+    results = []
+    
+    try:
+        for operation in suggestions['operations']:
+            try:
+                # Add linter status field
+                operation['linter_status'] = True  # Default to True
                 
-            full_path = os.path.join(workspace_dir, path)
-            rel_path = os.path.relpath(full_path, workspace_dir)
-            
-            if op_type == 'remove_directory':
-                if os.path.exists(full_path) and os.path.isdir(full_path):
-                    recursive = operation.get('recursive', False)
-                    if recursive:
-                        shutil.rmtree(full_path)
-                    else:
-                        os.rmdir(full_path)
-                        
-            elif op_type == 'remove_file':
-                if os.path.exists(full_path):
-                    os.remove(full_path)
+                if operation['type'] == 'create_file':
+                    # Create the file
+                    file_path = os.path.join(workspace_dir, operation['path'])
+                    os.makedirs(os.path.dirname(file_path), exist_ok=True)
                     
-            elif op_type == 'rename_file':
-                new_path = operation.get('new_path')
-                if new_path and os.path.exists(full_path):
-                    new_full_path = os.path.join(workspace_dir, new_path)
-                    os.makedirs(os.path.dirname(new_full_path), exist_ok=True)
-                    os.rename(full_path, new_full_path)
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(operation['content'])
                     
-            elif op_type in ['create_file', 'edit_file']:
-                explanation = operation.get('explanation', '')
-                
-                # Create directory if it doesn't exist
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                
-                # Get current content if file exists
-                current_content = ''
-                if os.path.exists(full_path):
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        current_content = f.read()
-                
-                # Determine new content
-                if op_type == 'create_file':
-                    new_content = operation.get('content', '')
-                else:  # edit_file
-                    if 'changes' in operation:
-                        # Apply each change in sequence
-                        new_content = current_content
-                        for change in operation['changes']:
-                            old_text = change.get('old', '')
-                            new_text = change.get('new', '')
-                            new_content = new_content.replace(old_text, new_text)
-                    else:
-                        new_content = operation.get('content', current_content)
-                
-                # Ensure content ends with newline
-                if new_content and not new_content.endswith('\n'):
-                    new_content += '\n'
-                
-                # Write the content
-                with open(full_path, 'w', encoding='utf-8') as f:
-                    f.write(new_content)
-                
-                # Generate diff
-                if current_content:
-                    print(f"Generating diff for modified file: {rel_path}")
-                    current_lines = current_content.splitlines()
-                    new_lines = new_content.splitlines()
+                    # Run appropriate linter
+                    operation['linter_status'] = run_linter(file_path)
+
+                elif operation['type'] == 'edit_file':
+                    file_path = os.path.join(workspace_dir, operation['path'])
                     
-                    diff_lines = list(difflib.unified_diff(
-                        current_lines,
-                        new_lines,
-                        fromfile=f'a/{rel_path}',
-                        tofile=f'b/{rel_path}',
-                        lineterm=''
-                    ))
+                    # Read the current content
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
                     
-                    if not diff_lines and current_content != new_content:
-                        diff_lines = [
-                            f'--- a/{rel_path}',
-                            f'+++ b/{rel_path}',
-                            f'@@ -1,{len(current_lines)} +1,{len(new_lines)} @@'
-                        ]
-                        for line in current_lines:
-                            diff_lines.append('-' + line)
-                        for line in new_lines:
-                            diff_lines.append('+' + line)
-                else:
-                    print(f"Generating diff for new file: {rel_path}")
-                    new_lines = new_content.splitlines()
-                    diff_lines = [
-                        f'--- /dev/null',
-                        f'+++ b/{rel_path}',
-                        f'@@ -0,0 +1,{len(new_lines)} @@'
-                    ]
-                    diff_lines.extend('+' + line for line in new_lines)
+                    # Apply the changes
+                    for change in operation['changes']:
+                        content = content.replace(change['old'], change['new'])
+                    
+                    # Write the updated content
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    
+                    # Run appropriate linter
+                    operation['linter_status'] = run_linter(file_path)
                 
-                diff = '\n'.join(diff_lines)
+                results.append({
+                    'status': 'success',
+                    'operation': operation
+                })
+            except Exception as e:
+                results.append({
+                    'status': 'error',
+                    'operation': operation,
+                    'error': str(e)
+                })
                 
-                # Store the file info
-                modified_files[rel_path] = {
-                    'content': new_content,
-                    'explanation': explanation,
-                    'diff': diff,
-                    'is_new': not os.path.exists(full_path) or op_type == 'create_file'
-                }
-        
-        return modified_files
-        
+        return results
     except Exception as e:
         raise Exception(f"Failed to apply changes: {str(e)}")
 

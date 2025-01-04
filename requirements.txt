@@ -4,3 +4,4 @@ anthropic==0.42.0
 openai==1.57.0
 flask-socketio==5.5.0
 eventlet==0.38.2
+pylama==8.4.1
