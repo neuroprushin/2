@@ -243,11 +243,25 @@ async function loadWorkspaceHistory() {
                 const actionsDiv = document.createElement('div');
                 actionsDiv.className = 'flex items-center gap-2';
                 
-                // Only show rename button for non-imported workspaces
-                if (!isImported) {
+                if (isImported) {
+                    // Show Unlink button for imported workspaces
+                    const unlinkBtn = document.createElement('button');
+                    unlinkBtn.className = 'p-2 text-blue-400 hover:text-blue-300 transition-colors';
+                    unlinkBtn.innerHTML = '<i class="fas fa-unlink"></i>';
+                    unlinkBtn.title = 'Unlink workspace';
+                    unlinkBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        if (confirm('Are you sure you want to unlink this workspace? The original folder will remain unchanged.')) {
+                            deleteWorkspace(workspace.id);
+                        }
+                    };
+                    actionsDiv.appendChild(unlinkBtn);
+                } else {
+                    // Show Rename and Delete buttons for regular workspaces
                     const renameBtn = document.createElement('button');
                     renameBtn.className = 'p-2 text-blue-400 hover:text-blue-300 transition-colors';
                     renameBtn.innerHTML = '<i class="fas fa-edit"></i>';
+                    renameBtn.title = 'Rename workspace';
                     renameBtn.onclick = (e) => {
                         e.stopPropagation();
                         const newName = prompt('Enter new workspace name:', workspace.id);
@@ -255,23 +269,21 @@ async function loadWorkspaceHistory() {
                             renameWorkspace(workspace.id, newName);
                         }
                     };
+                    
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'p-2 text-red-400 hover:text-red-300 transition-colors';
+                    deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+                    deleteBtn.title = 'Delete workspace';
+                    deleteBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        if (confirm('Are you sure you want to delete this workspace? This action cannot be undone.')) {
+                            deleteWorkspace(workspace.id);
+                        }
+                    };
+                    
                     actionsDiv.appendChild(renameBtn);
+                    actionsDiv.appendChild(deleteBtn);
                 }
-                
-                const deleteBtn = document.createElement('button');
-                deleteBtn.className = 'p-2 text-red-400 hover:text-red-300 transition-colors';
-                deleteBtn.title = isImported ? 'Unlink workspace' : 'Delete workspace';
-                deleteBtn.innerHTML = `<i class="fas fa-${isImported ? 'unlink' : 'trash'}"></i>`;
-                deleteBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    const message = isImported 
-                        ? 'Are you sure you want to unlink this workspace? The original folder will remain unchanged.'
-                        : 'Are you sure you want to delete this workspace? This action cannot be undone.';
-                    if (confirm(message)) {
-                        deleteWorkspace(workspace.id);
-                    }
-                };
-                actionsDiv.appendChild(deleteBtn);
                 
                 workspaceDiv.appendChild(infoDiv);
                 workspaceDiv.appendChild(actionsDiv);
@@ -464,65 +476,137 @@ function updateWorkspaceTree(structure) {
 }
 
 function buildTree(structure, parentElement) {
-    for (const item of structure) {
-        const itemDiv = document.createElement('div');
-        itemDiv.className = 'tree-item';
+    // First, organize items into a proper tree structure
+    const tree = {};
+    
+    // Sort items by path and organize into tree
+    structure.forEach(item => {
+        const parts = item.path.split('/');
+        let current = tree;
         
-        const iconSpan = document.createElement('span');
-        iconSpan.className = 'icon';
-        
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'name';
-        nameSpan.textContent = item.name;
-        
-        if (item.type === 'directory') {
-            iconSpan.innerHTML = '<i class="fas fa-folder"></i>';
-            itemDiv.classList.add('folder');
-            
-            const childrenDiv = document.createElement('div');
-            childrenDiv.className = 'children hidden';
-            
-            itemDiv.onclick = (event) => {
-                event.stopPropagation();
-                // Remove selected class from all items
-                document.querySelectorAll('.tree-item').forEach(item => item.classList.remove('selected'));
-                // Add selected class to clicked item
-                itemDiv.classList.add('selected');
-                
-                childrenDiv.classList.toggle('hidden');
-                const icon = iconSpan.querySelector('i');
-                if (icon) {
-                    icon.classList.toggle('fa-folder');
-                    icon.classList.toggle('fa-folder-open');
-                }
-            };
-            
-            if (item.children && item.children.length > 0) {
-                buildTree(item.children, childrenDiv);
+        // Build path hierarchy
+        for (let i = 0; i < parts.length - 1; i++) {
+            const part = parts[i];
+            if (!current[part]) {
+                current[part] = {
+                    type: 'directory',
+                    name: part,
+                    children: {}
+                };
             }
-            
-            itemDiv.appendChild(iconSpan);
-            itemDiv.appendChild(nameSpan);
-            itemDiv.appendChild(childrenDiv);
-        } else {
-            itemDiv.classList.add('file');
-            iconSpan.innerHTML = getFileIcon(item.name);
-            
-            itemDiv.onclick = (event) => {
-                event.stopPropagation();
-                // Remove selected class from all items
-                document.querySelectorAll('.tree-item').forEach(item => item.classList.remove('selected'));
-                // Add selected class to clicked item
-                itemDiv.classList.add('selected');
-                showFileContent(item.path);
-            };
-            
-            itemDiv.appendChild(iconSpan);
-            itemDiv.appendChild(nameSpan);
+            current = current[part].children;
         }
         
-        parentElement.appendChild(itemDiv);
+        // Add the file/folder
+        const name = parts[parts.length - 1];
+        if (item.type === 'directory') {
+            if (!current[name]) {
+                current[name] = {
+                    type: 'directory',
+                    name: name,
+                    children: {}
+                };
+            }
+        } else {
+            current[name] = {
+                type: 'file',
+                name: name,
+                path: item.path
+            };
+        }
+    });
+    
+    // Function to render the tree
+    function renderTree(node, container) {
+        // Sort items: folders first, then files
+        const items = Object.values(node);
+        items.sort((a, b) => {
+            if (a.type === b.type) {
+                return a.name.localeCompare(b.name);
+            }
+            return a.type === 'directory' ? -1 : 1;
+        });
+        
+        items.forEach(item => {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'tree-item';
+            
+            if (item.type === 'directory') {
+                itemDiv.classList.add('folder');
+                
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'folder-header';
+                
+                const iconSpan = document.createElement('span');
+                iconSpan.className = 'icon';
+                iconSpan.innerHTML = '<i class="fas fa-folder"></i>';
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'name';
+                nameSpan.textContent = item.name;
+                
+                headerDiv.appendChild(iconSpan);
+                headerDiv.appendChild(nameSpan);
+                
+                const childrenDiv = document.createElement('div');
+                childrenDiv.className = 'children';
+                
+                headerDiv.onclick = (event) => {
+                    event.stopPropagation();
+                    
+                    // Toggle expanded state
+                    const wasExpanded = itemDiv.classList.contains('expanded');
+                    itemDiv.classList.toggle('expanded');
+                    
+                    // Update folder icon
+                    const icon = iconSpan.querySelector('i');
+                    if (icon) {
+                        icon.classList.toggle('fa-folder', wasExpanded);
+                        icon.classList.toggle('fa-folder-open', !wasExpanded);
+                    }
+                };
+                
+                if (Object.keys(item.children).length > 0) {
+                    renderTree(item.children, childrenDiv);
+                }
+                
+                itemDiv.appendChild(headerDiv);
+                itemDiv.appendChild(childrenDiv);
+            } else {
+                itemDiv.classList.add('file');
+                
+                const iconSpan = document.createElement('span');
+                iconSpan.className = 'icon';
+                iconSpan.innerHTML = getFileIcon(item.name);
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'name';
+                nameSpan.textContent = item.name;
+                
+                itemDiv.appendChild(iconSpan);
+                itemDiv.appendChild(nameSpan);
+                
+                itemDiv.onclick = (event) => {
+                    event.stopPropagation();
+                    
+                    // Handle file selection
+                    const allItems = document.querySelectorAll('.tree-item');
+                    allItems.forEach(item => {
+                        item.classList.remove('selected');
+                    });
+                    itemDiv.classList.add('selected');
+                    
+                    showFileContent(item.path);
+                };
+            }
+            
+            container.appendChild(itemDiv);
+        });
     }
+    
+    // Clear and render the tree
+    parentElement.innerHTML = '';
+    renderTree(tree, parentElement);
 }
 
 function getFileIcon(filename) {
