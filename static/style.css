@@ -804,6 +804,16 @@ textarea:focus {
     filter: brightness(1.2);
 }
 
+/* Button Container */
+.button-container {
+    opacity: 0;
+    position: absolute;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+    transition: all 0.2s ease;
+}
+
 /* Recommendation Button */
 .recommendation-btn {
     opacity: 0;
@@ -821,24 +831,49 @@ textarea:focus {
     padding: 0;
 }
 
-.recommendation-btn i {
+/* Code Generation Button */
+.code-gen-btn {
+    opacity: 0;
+    position: absolute;
+    right: 40px;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: var(--primary);
+    color: white;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+/* Common button icon styles */
+.recommendation-btn i,
+.code-gen-btn i {
     font-size: 14px;
     margin: 0;
     width: auto;
     height: auto;
 }
 
-.recommendation-btn:hover {
+/* Common button hover effects */
+.recommendation-btn:hover,
+.code-gen-btn:hover {
     background: var(--primary-hover);
     transform: scale(1.1);
 }
 
+/* Ensure headers can position buttons properly */
 .tree-item .folder-header,
 .tree-item .file-header {
     position: relative;
 }
 
+/* Show buttons on hover */
 .tree-item .folder-header:hover .recommendation-btn,
-.tree-item .file-header:hover .recommendation-btn {
+.tree-item .file-header:hover .recommendation-btn,
+.tree-item .folder-header:hover .code-gen-btn,
+.tree-item .file-header:hover .code-gen-btn {
     opacity: 1;
 } 

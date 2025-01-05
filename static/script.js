@@ -600,11 +600,22 @@ function buildTree(structure, container, parentPath = '') {
             name.textContent = itemPath.split('/').pop();
             folderHeader.appendChild(name);
             
+            // Add code generation button
+            const codeGenBtn = document.createElement('button');
+            codeGenBtn.className = 'code-gen-btn';
+            codeGenBtn.innerHTML = '<i class="fas fa-code"></i>';
+            codeGenBtn.title = 'Get Code Insights';
+            codeGenBtn.onclick = (e) => {
+                e.stopPropagation();
+                getCodeGeneration(fullPath, 'directory');
+            };
+            folderHeader.appendChild(codeGenBtn);
+            
             // Add recommendation button
             const recBtn = document.createElement('button');
             recBtn.className = 'recommendation-btn';
             recBtn.innerHTML = '<i class="fas fa-brain"></i>';
-            recBtn.title = 'Get AI insights';
+            recBtn.title = 'Get AI Insights';
             recBtn.onclick = (e) => {
                 e.stopPropagation();
                 getRecommendations(fullPath, 'directory');
@@ -737,6 +748,17 @@ function buildTree(structure, container, parentPath = '') {
             name.className = 'name text-gray-300';
             name.textContent = itemPath.split('/').pop();
             fileHeader.appendChild(name);
+            
+            // Add code generation button
+            const codeGenBtn = document.createElement('button');
+            codeGenBtn.className = 'code-gen-btn';
+            codeGenBtn.innerHTML = '<i class="fas fa-code"></i>';
+            codeGenBtn.title = 'Generate/Modify Code';
+            codeGenBtn.onclick = (e) => {
+                e.stopPropagation();
+                getCodeGeneration(fullPath, 'file');
+            };
+            fileHeader.appendChild(codeGenBtn);
             
             // Add recommendation button
             const recBtn = document.createElement('button');
@@ -2064,4 +2086,23 @@ async function getRecommendations(path, type) {
         loadingMessage.remove();
         appendErrorMessage('Error: ' + error.message);
     }
+}
+
+async function getCodeGeneration(path, type) {
+    if (!validateWorkspace()) return;
+    
+    const prompt = type === 'directory' ? 
+        `Please help me modify or generate code for the folder "${path}". Suggest improvements, new files, or modifications.` :
+        `Please help me modify or generate code for the file "${path}". Suggest improvements or modifications.`;
+    
+    // Focus the code tab
+    document.getElementById('codeMode').classList.remove('hidden');
+    document.getElementById('chatMode').classList.add('hidden');
+    
+    // Set the prompt in the input field
+    const promptInput = document.getElementById('promptInput');
+    promptInput.value = prompt;
+    
+    // Trigger the code generation
+    await processPrompt();
 } 
