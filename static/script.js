@@ -1169,54 +1169,61 @@ function appendOperation(container, operation) {
     header.appendChild(leftSide);
     
     // Right side: linter status
-    if (operation.linter_status !== undefined) {
+    if (operation.lint_passed !== undefined) {
         const linterStatus = document.createElement('div');
         linterStatus.className = 'flex items-center gap-2';
         linterStatus.innerHTML = `
-            <i class="fas fa-${operation.linter_status ? 'check' : 'exclamation-triangle'} text-${operation.linter_status ? 'green' : 'yellow'}-500"></i>
-            <span class="text-sm text-${operation.linter_status ? 'green' : 'yellow'}-500">
-                ${operation.linter_status ? 'Linter passed' : 'Linter warnings'}
+            <i class="fas fa-${operation.lint_passed ? 'check' : 'exclamation-triangle'} text-${operation.lint_passed ? 'green' : 'yellow'}-500"></i>
+            <span class="text-sm text-${operation.lint_passed ? 'green' : 'yellow'}-500">
+                ${operation.lint_passed ? 'Linter passed' : 'Linter warnings'}
             </span>
         `;
         header.appendChild(linterStatus);
     }
-
+    
     operationDiv.appendChild(header);
 
     // Operation content
-    if (operation.type === 'edit_file') {
+    if (operation.type === 'edit_file' || operation.type === 'create_file') {
+        // Show diff if available
         if (operation.diff) {
             const diffDiv = document.createElement('div');
             diffDiv.className = 'bg-gray-900 rounded-lg p-4 font-mono text-sm whitespace-pre overflow-x-auto';
             
-            const formattedDiff = operation.diff.split('\n').map(line => {
-                if (!line) return '<span class="text-gray-400">\n</span>';  // Show empty lines
+            const lines = operation.diff.split('\n');
+            const filteredLines = lines.filter((line, index) => line !== '' || index !== lines.length - 1);
+            const formattedLines = filteredLines.map(line => {
+                if (line.startsWith('---')) {
+                    return `<span class="text-red-500">${escapeHtml(line)}</span>`;
+                }
+                if (line.startsWith('+++')) {
+                    return `<span class="text-green-500">${escapeHtml(line)}</span>`;
+                }
                 if (line.startsWith('+')) {
                     return `<span class="text-green-500">${escapeHtml(line)}</span>`;
-                } else if (line.startsWith('-')) {
-                    return `<span class="text-red-500">${escapeHtml(line)}</span>`;
-                } else if (line.startsWith('@@')) {
-                    return `<span class="text-gray-500">${escapeHtml(line)}</span>`;
-                } else {
-                    return `<span class="text-gray-400">${escapeHtml(line)}</span>`;
                 }
-            }).join('\n');  // Keep newlines between lines
+                if (line.startsWith('-')) {
+                    return `<span class="text-red-500">${escapeHtml(line)}</span>`;
+                }
+                if (line.startsWith('@@')) {
+                    return `<span class="text-blue-500">${escapeHtml(line)}</span>`;
+                }
+                return `<span class="text-gray-400">${escapeHtml(line)}</span>`;
+            });
             
-            diffDiv.innerHTML = formattedDiff;
+            diffDiv.innerHTML = formattedLines.join('\n');
             operationDiv.appendChild(diffDiv);
-        } else if (operation.content) {
-            const codeDiv = document.createElement('div');
-            codeDiv.className = 'bg-gray-900 rounded-lg p-4 font-mono text-sm whitespace-pre overflow-x-auto';
-            codeDiv.innerHTML = `<code class="language-${getLanguageMode(operation.path)}">${escapeHtml(operation.content)}</code>`;
-            operationDiv.appendChild(codeDiv);
         }
-    } else if (operation.type === 'create_file' && operation.content) {
-        const codeDiv = document.createElement('div');
-        codeDiv.className = 'bg-gray-900 rounded-lg p-4 font-mono text-sm whitespace-pre overflow-x-auto';
-        codeDiv.innerHTML = `<code class="language-${getLanguageMode(operation.path)}">${escapeHtml(operation.content)}</code>`;
-        operationDiv.appendChild(codeDiv);
+        
+        // Show lint output if available
+        if (operation.lint_output && !operation.lint_passed) {
+            const lintDiv = document.createElement('div');
+            lintDiv.className = 'mt-4 bg-gray-900 rounded-lg p-4 font-mono text-sm whitespace-pre overflow-x-auto text-yellow-500';
+            lintDiv.textContent = operation.lint_output;
+            operationDiv.appendChild(lintDiv);
+        }
     }
-
+    
     container.appendChild(operationDiv);
 }
 
@@ -1449,7 +1456,7 @@ async function showFileContent(filePath) {
             // Create textarea with content
             const textarea = document.createElement('textarea');
             if (data.content !== undefined && data.content !== null) {
-                textarea.value = data.content;
+                textarea.value = data.content.replace(/\n$/, '');  // Remove trailing newline if present
                 console.log('Content length:', data.content.length);  // Debug log
             } else {
                 console.warn('No content received from server');  // Debug log
@@ -1473,7 +1480,10 @@ async function showFileContent(filePath) {
                 scrollbarStyle: 'overlay',
                 lineWrapping: true,
                 viewportMargin: Infinity,
-                height: '400px'
+                lineSeparator: '\n',
+                smartIndent: false,
+                electricChars: false,
+                extraKeys: null
             });
 
             // Set editor size and force refresh

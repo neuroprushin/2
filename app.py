@@ -1,19 +1,22 @@
+import os
+import json
+import shutil
+import tempfile
+import re
+from datetime import datetime
+from pathlib import Path
+import difflib
+
 import eventlet
 eventlet.monkey_patch()
 
+# These imports must be after eventlet.monkey_patch() for proper async operation
+# noqa: E402 pylama: ignore=E402
 from flask import Flask, render_template, request, jsonify, send_from_directory
-import os
-import tempfile
+from flask_socketio import SocketIO, emit
 from dotenv import load_dotenv
 from openai import OpenAI
 from anthropic import Anthropic
-import json
-import shutil
-from pathlib import Path
-from datetime import datetime
-import difflib
-import re
-from flask_socketio import SocketIO, emit
 from workspace_manager import WorkspaceManager
 
 # Model configurations
@@ -169,11 +172,19 @@ def get_workspace_history():
             # Get directory creation time
             created_at = datetime.fromtimestamp(os.path.getctime(workspace_path))
             
-            # Count files in workspace
-            file_count = 0
-            for root, _, files in os.walk(workspace_path):
-                # Exclude hidden files
-                file_count += sum(1 for f in files if not f.startswith('.'))
+            # Count files in workspace using workspace_manager's logic
+            total_files = 0
+            for root, dirs, files in os.walk(workspace_path):
+                # Skip .git and other ignored directories
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in workspace_manager.SKIP_FOLDERS]
+                
+                # Filter files based on gitignore and skip patterns
+                for file in files:
+                    if (not file.startswith('.') and 
+                        not file.endswith(tuple(workspace_manager.SKIP_EXTENSIONS))):
+                        rel_path = os.path.relpath(os.path.join(root, file), workspace_path)
+                        if not workspace_manager._should_ignore(rel_path):
+                            total_files += 1
             
             # Check if this is an imported workspace
             is_imported = os.path.exists(os.path.join(workspace_path, '.imported'))
@@ -182,7 +193,7 @@ def get_workspace_history():
                 'id': item,
                 'path': workspace_path,
                 'created_at': created_at.isoformat(),
-                'file_count': file_count,
+                'file_count': total_files,
                 'is_imported': is_imported
             })
     
@@ -464,9 +475,9 @@ def process_prompt():
         elif not os.path.exists(workspace_dir):
             return jsonify({'status': 'error', 'message': 'Invalid workspace directory'}), 400
         
-        # Use workspace manager to get files content
+        # Use workspace manager to get relevant files based on the query
         socketio.emit('status', {'message': 'Reading workspace files...', 'step': 1})
-        files_content = workspace_manager.get_workspace_files(workspace_dir)
+        files_content = workspace_manager.get_workspace_files(workspace_dir, query=prompt)
         
         # Add attachment contents to files_content
         if attachments:
@@ -689,17 +700,21 @@ def chat():
         if not workspace_dir or not os.path.exists(workspace_dir):
             return jsonify({'error': 'Invalid workspace directory'}), 400
         
-        # Use workspace manager to get context
-        workspace_context = workspace_manager.get_workspace_context(workspace_dir)
+        # Use workspace manager to get relevant files based on the query
+        files_content = workspace_manager.get_workspace_files(workspace_dir, query=prompt)
         
         # Add attachment contents to the context
         if attachments:
-            workspace_context += "\n\nAttached files:\n\n"
             for attachment in attachments:
-                workspace_context += f"File: {attachment['name']}\nContent:\n{attachment['content']}\n\n"
+                files_content[f"[ATTACHMENT] {attachment['name']}"] = attachment['content']
+        
+        # Build context from files
+        context = "Here are the relevant files in the workspace:\n\n"
+        for file_path, content in files_content.items():
+            context += f"File: {file_path}\nContent:\n{content}\n\n"
         
         system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss the code in the workspace.
-{workspace_context}
+{context}
 
 Please provide helpful responses about the code and files in this workspace."""
 
