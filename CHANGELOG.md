@@ -2,14 +2,66 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.7] - 2024-01-08
+
+### Changed
+- Updated model lineup:
+  - Removed Codestral Mamba model
+  - Optimized model configurations
+  - Streamlined API integrations
+
+### Fixed
+- Model selection and configuration handling
+- API key validation for remaining models
+- Documentation consistency
+
+## [0.0.6] - 2024-01-07
+
+### Added
+- Folder import functionality:
+  - Import existing project folders as workspaces
+  - Symlink support for efficient storage
+  - Automatic workspace naming from folder
+  - Import status tracking
+- Enhanced file management:
+  - File renaming within workspaces
+  - Improved file path validation
+  - Better directory structure handling
+
+### Changed
+- Improved workspace management:
+  - Better handling of imported workspaces
+  - Enhanced file system operations
+  - More robust path validation
+- Enhanced security measures:
+  - Stricter file path validation
+  - Improved symlink handling
+  - Better error handling for file operations
+
 ## [0.0.5] - 2024-01-06
 
 ### Added
-- Integrated Codestral Mamba model:
-  - High-performance inference capabilities
-  - Enhanced code completion and generation
-  - Improved context understanding
-  - State-of-the-art reasoning abilities
+- New modern UI design inspired by Cursor IDE:
+  - Bubble-style panels for workspace, chat, and main content
+  - Centered logo and title placement
+  - Improved spacing and layout consistency
+  - Enhanced visual hierarchy
+- Improved chat interface:
+  - Fixed height chat input area
+  - Better message spacing
+  - Cleaner bubble design
+- Enhanced workspace panel:
+  - Centralized workspace controls
+  - Better organized file tree
+  - Improved model selection dropdown
+- Updated copyright notice with special thanks
+
+### Changed
+- Adjusted panel widths for better usability
+- Improved spacing between elements
+- Enhanced button styles and hover effects
+- Refined color scheme and borders
+- Reorganized layout structure for better visual flow
 
 ## [0.0.4] - 2024-01-05
 

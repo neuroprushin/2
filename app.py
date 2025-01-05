@@ -47,16 +47,6 @@ AVAILABLE_MODELS = {
             'chat': 'qwen/qwen-2.5-coder-32b-instruct'
         }
     },
-    'codestral-mamba': {
-        'name': 'Codestral Mamba',
-        'api_key_env': 'OPENROUTER_API_KEY',
-        'client_class': OpenAI,
-        'base_url': 'https://openrouter.ai/api/v1',
-        'models': {
-            'code': 'mistralai/codestral-mamba',
-            'chat': 'mistralai/codestral-mamba'
-        }
-    },
     'claude': {
         'name': 'Claude 3.5 Sonnet',
         'api_key_env': 'ANTHROPIC_API_KEY',
