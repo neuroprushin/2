@@ -413,24 +413,38 @@ def get_history():
         }), 500
 
 @app.route('/workspace/structure', methods=['POST'])
-def get_structure():
+def get_workspace_structure():
     try:
-        data = request.json
+        data = request.get_json()
         workspace_dir = data.get('workspace_dir')
         
         if not workspace_dir or not os.path.exists(workspace_dir):
-            return jsonify({'error': 'Invalid workspace directory'}), 400
-            
-        structure = get_workspace_structure(workspace_dir)
-        return jsonify({
-            'status': 'success',
-            'structure': structure
-        })
+            return jsonify({'status': 'error', 'message': 'Invalid workspace directory'})
+        
+        structure = workspace_manager.get_workspace_structure(workspace_dir)
+        return jsonify({'status': 'success', 'structure': structure})
+        
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/workspace/expand', methods=['POST'])
+def expand_directory():
+    try:
+        data = request.get_json()
+        workspace_dir = data.get('workspace_dir')
+        dir_path = data.get('dir_path')
+        
+        if not workspace_dir or not os.path.exists(workspace_dir):
+            return jsonify({'status': 'error', 'message': 'Invalid workspace directory'})
+            
+        if not dir_path:
+            return jsonify({'status': 'error', 'message': 'Directory path not provided'})
+            
+        children = workspace_manager.expand_directory(dir_path)
+        return jsonify({'status': 'success', 'children': children})
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
 
 @app.route('/process', methods=['POST'])
 def process_prompt():
@@ -527,44 +541,89 @@ def get_file_content():
         file_path = data.get('file_path')
         
         if not workspace_dir or not file_path:
-            return jsonify({'error': 'Missing workspace_dir or file_path'}), 400
+            return jsonify({'status': 'error', 'message': 'Missing workspace_dir or file_path'}), 400
             
         # Validate file path to prevent directory traversal
         if '..' in file_path or file_path.startswith('/'):
-            return jsonify({'error': 'Invalid file path'}), 400
+            return jsonify({'status': 'error', 'message': 'Invalid file path'}), 400
             
-        # Ensure the file is within the workspace
-        full_path = os.path.abspath(os.path.join(workspace_dir, file_path))
-        if not full_path.startswith(os.path.abspath(workspace_dir)):
-            return jsonify({'error': 'File path not within workspace'}), 400
+        # Get the full path by joining workspace_dir and file_path
+        full_path = os.path.normpath(os.path.join(workspace_dir, file_path))
             
-        full_path = os.path.join(workspace_dir, file_path)
+        print(f"Workspace: {workspace_dir}")  # Debug log
+        print(f"File path: {file_path}")  # Debug log
+        print(f"Full path: {full_path}")  # Debug log
+            
+        if not os.path.abspath(full_path).startswith(os.path.abspath(workspace_dir)):
+            return jsonify({'status': 'error', 'message': 'File path not within workspace'}), 400
+            
         if not os.path.exists(full_path):
+            print(f"File not found: {full_path}")  # Debug log
             return jsonify({
                 'status': 'success',
-                'content': ''  # Return empty content for new files
+                'content': '',  # Return empty content for new files
+                'file_size': 0,
+                'truncated': False
             })
+        
+        # Get file size
+        try:
+            file_size = os.path.getsize(full_path)
+            print(f"File size for {full_path}: {file_size} bytes")  # Debug log
+        except OSError as e:
+            print(f"Error getting file size: {str(e)}")  # Debug log
+            file_size = 0
         
         # Check if it's a large file
         if is_large_file(full_path):
             preview_content = get_file_preview(full_path)
+            print(f"Large file preview length: {len(preview_content)}")  # Debug log
             return jsonify({
                 'status': 'success',
                 'content': preview_content,
                 'truncated': True,
-                'file_size': get_file_size(full_path)
+                'file_size': file_size
             })
         
-        with open(full_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        content = None
+        try:
+            # Try UTF-8 first
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                print(f"File content length (UTF-8): {len(content)}")  # Debug log
+        except UnicodeDecodeError:
+            try:
+                # Try with latin-1 encoding if UTF-8 fails
+                with open(full_path, 'r', encoding='latin-1') as f:
+                    content = f.read()
+                    print(f"File content length (latin-1): {len(content)}")  # Debug log
+            except Exception as e:
+                print(f"Error reading file with latin-1: {str(e)}")  # Debug log
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Could not read file: invalid encoding'
+                }), 500
+        except Exception as e:
+            print(f"Error reading file with UTF-8: {str(e)}")  # Debug log
+            return jsonify({
+                'status': 'error',
+                'message': f'Could not read file: {str(e)}'
+            }), 500
+            
+        if content is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'Could not read file content'
+            }), 500
             
         return jsonify({
             'status': 'success',
             'content': content,
             'truncated': False,
-            'file_size': get_file_size(full_path)
+            'file_size': file_size
         })
     except Exception as e:
+        print(f"Error in get_file_content: {str(e)}")  # Debug log
         return jsonify({
             'status': 'error',
             'message': str(e)

@@ -209,21 +209,33 @@ async function createWorkspace() {
 
 async function loadWorkspaceHistory() {
     try {
+        console.log('Loading workspace history');
         const response = await fetch('/workspace/history');
         const data = await response.json();
+        console.log('Workspace history response:', data);
 
         if (data.status === 'success') {
             const historyList = document.getElementById('workspaceHistory');
             historyList.innerHTML = '';
 
             data.history.forEach(workspace => {
+                console.log('Creating workspace item:', workspace);
                 const workspaceDiv = document.createElement('div');
                 const isImported = workspace.is_imported;
-                workspaceDiv.className = `workspace-item flex items-center justify-between p-3 hover:bg-gray-700 rounded-lg cursor-pointer transition-colors ${isImported ? 'border-l-4 border-blue-500 bg-blue-900 bg-opacity-10' : ''}`;
+                workspaceDiv.className = `workspace-item flex items-center justify-between p-3 hover:bg-gray-700 rounded-lg cursor-pointer transition-colors ${isImported ? 'border-l-4 border-blue-500 bg-blue-900 bg-opacity-10' : ''} ${workspace.path === currentWorkspace ? 'bg-blue-900 bg-opacity-20' : ''}`;
+                workspaceDiv.dataset.path = workspace.path;
+                console.log('Set workspace path:', workspaceDiv.dataset.path);
+                
+                // Make the entire div clickable
+                workspaceDiv.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Workspace clicked:', workspace.path);
+                    selectWorkspace(workspace.path);
+                };
                 
                 const infoDiv = document.createElement('div');
                 infoDiv.className = 'flex-1';
-                infoDiv.onclick = () => selectWorkspace(workspace.path);
                 
                 const nameSpan = document.createElement('div');
                 nameSpan.className = 'flex items-center gap-2';
@@ -368,9 +380,27 @@ function createButton(iconClass, buttonClass, onClick) {
 }
 
 async function selectWorkspace(path) {
+    console.log('Selecting workspace:', path);
+    
+    // Clear previous selection
+    document.querySelectorAll('.workspace-item').forEach(item => {
+        item.classList.remove('bg-blue-900', 'bg-opacity-20');
+    });
+    
+    // Find and highlight the selected workspace
+    const selectedItem = Array.from(document.querySelectorAll('.workspace-item')).find(
+        item => item.dataset.path === path
+    );
+    console.log('Found selected item:', selectedItem);
+    if (selectedItem) {
+        selectedItem.classList.add('bg-blue-900', 'bg-opacity-20');
+    }
+
     currentWorkspace = path;
+    console.log('Current workspace set to:', currentWorkspace);
     
     try {
+        console.log('Fetching workspace structure for:', path);
         const response = await fetch('/workspace/structure', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -378,6 +408,8 @@ async function selectWorkspace(path) {
         });
         
         const data = await response.json();
+        console.log('Workspace structure response:', data);
+        
         if (data.status === 'success') {
             // Update workspace info
             const workspaceInfo = document.getElementById('currentWorkspaceInfo');
@@ -428,220 +460,389 @@ function updateWorkspaceTree(structure) {
     }
 }
 
-function buildTree(structure, parentElement) {
-    // First, organize items into a proper tree structure
-    const tree = {};
-    
-    // Sort items by path and organize into tree
+function buildTree(structure, container) {
     structure.forEach(item => {
-        const parts = item.path.split('/');
-        let current = tree;
+        const itemDiv = document.createElement('div');
+        itemDiv.className = `tree-item ${item.type === 'directory' ? 'folder' : 'file'}`;
         
-        // Build path hierarchy
-        for (let i = 0; i < parts.length - 1; i++) {
-            const part = parts[i];
-            if (!current[part]) {
-                current[part] = {
-                    type: 'directory',
-                    name: part,
-                    children: {}
-                };
-            }
-            current = current[part].children;
-        }
+        // Get the relative path by removing any leading slashes
+        const relativePath = item.path.replace(/^[\/\\]+/, '');
         
-        // Add the file/folder
-        const name = parts[parts.length - 1];
         if (item.type === 'directory') {
-            if (!current[name]) {
-                current[name] = {
-                    type: 'directory',
-                    name: name,
-                    children: {}
-                };
-            }
-        } else {
-            current[name] = {
-                type: 'file',
-                name: name,
-                path: item.path
-            };
-        }
-    });
-    
-    // Function to render the tree
-    function renderTree(node, container) {
-        // Sort items: folders first, then files
-        const items = Object.values(node);
-        items.sort((a, b) => {
-            if (a.type === b.type) {
-                return a.name.localeCompare(b.name);
-            }
-            return a.type === 'directory' ? -1 : 1;
-        });
-        
-        items.forEach(item => {
-            const itemDiv = document.createElement('div');
-            itemDiv.className = 'tree-item';
+            const folderHeader = document.createElement('div');
+            folderHeader.className = 'folder-header flex items-center gap-2 p-1 hover:bg-gray-700 rounded cursor-pointer';
             
-            if (item.type === 'directory') {
-                itemDiv.classList.add('folder');
-                
-                const headerDiv = document.createElement('div');
-                headerDiv.className = 'folder-header';
-                
-                const iconSpan = document.createElement('span');
-                iconSpan.className = 'icon';
-                iconSpan.innerHTML = '<i class="fas fa-folder"></i>';
-                
-                const nameSpan = document.createElement('span');
-                nameSpan.className = 'name';
-                nameSpan.textContent = item.name;
-                
-                headerDiv.appendChild(iconSpan);
-                headerDiv.appendChild(nameSpan);
-                
-                const childrenDiv = document.createElement('div');
-                childrenDiv.className = 'children';
-                
-                headerDiv.onclick = (event) => {
-                    event.stopPropagation();
-                    
-                    // Toggle expanded state
-                    const wasExpanded = itemDiv.classList.contains('expanded');
-                    itemDiv.classList.toggle('expanded');
-                    
-                    // Update folder icon
-                    const icon = iconSpan.querySelector('i');
-                    if (icon) {
-                        icon.classList.toggle('fa-folder', wasExpanded);
-                        icon.classList.toggle('fa-folder-open', !wasExpanded);
+            const icon = document.createElement('i');
+            icon.className = 'fas fa-folder text-yellow-400';
+            folderHeader.appendChild(icon);
+            
+            const name = document.createElement('span');
+            name.className = 'name text-gray-300';
+            name.textContent = relativePath.split('/').pop();
+            folderHeader.appendChild(name);
+            
+            itemDiv.appendChild(folderHeader);
+            
+            const children = document.createElement('div');
+            children.className = 'children ml-4 mt-1';
+            itemDiv.appendChild(children);
+            
+            // Lazy loading of directory contents
+            folderHeader.onclick = async () => {
+                if (!itemDiv.classList.contains('expanded')) {
+                    // Only load children if not already loaded
+                    if (!children.hasChildNodes() && item.has_children) {
+                        try {
+                            const response = await fetch('/workspace/expand', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ 
+                                    workspace_dir: currentWorkspace,
+                                    dir_path: relativePath 
+                                })
+                            });
+                            
+                            const data = await response.json();
+                            if (data.status === 'success') {
+                                buildTree(data.children, children);
+                            }
+                        } catch (error) {
+                            console.error('Error expanding directory:', error);
+                        }
                     }
-                };
-                
-                if (Object.keys(item.children).length > 0) {
-                    renderTree(item.children, childrenDiv);
                 }
-                
-                itemDiv.appendChild(headerDiv);
-                itemDiv.appendChild(childrenDiv);
-            } else {
-                itemDiv.classList.add('file');
-                
-                const iconSpan = document.createElement('span');
-                iconSpan.className = 'icon';
-                iconSpan.innerHTML = getFileIcon(item.name);
-                
-                const nameSpan = document.createElement('span');
-                nameSpan.className = 'name';
-                nameSpan.textContent = item.name;
-                
-                itemDiv.appendChild(iconSpan);
-                itemDiv.appendChild(nameSpan);
-                
-                itemDiv.onclick = (event) => {
-                    event.stopPropagation();
-                    
-                    // Handle file selection
-                    const allItems = document.querySelectorAll('.tree-item');
-                    allItems.forEach(item => {
-                        item.classList.remove('selected');
-                    });
-                    itemDiv.classList.add('selected');
-                    
-                    showFileContent(item.path);
-                };
+                itemDiv.classList.toggle('expanded');
+                icon.className = itemDiv.classList.contains('expanded') ? 'fas fa-folder-open text-yellow-400' : 'fas fa-folder text-yellow-400';
+            };
+        } else {
+            const fileHeader = document.createElement('div');
+            fileHeader.className = 'file-header flex items-center gap-2 p-1 hover:bg-gray-700 rounded cursor-pointer';
+            
+            const icon = document.createElement('i');
+            const iconClass = getFileIcon(relativePath);
+            icon.className = `fas ${iconClass}`;
+            fileHeader.appendChild(icon);
+            
+            const name = document.createElement('span');
+            name.className = 'name text-gray-300';
+            name.textContent = relativePath.split('/').pop();
+            fileHeader.appendChild(name);
+            
+            // Show file size for large files
+            if (item.size > 1024 * 1024) { // 1MB
+                const size = document.createElement('span');
+                size.className = 'text-xs text-gray-400';
+                size.textContent = `${(item.size / (1024 * 1024)).toFixed(1)}MB`;
+                fileHeader.appendChild(size);
             }
             
-            container.appendChild(itemDiv);
-        });
-    }
-    
-    // Clear and render the tree
-    parentElement.innerHTML = '';
-    renderTree(tree, parentElement);
+            itemDiv.appendChild(fileHeader);
+            
+            // Add click handler to view file content
+            fileHeader.onclick = () => showFileContent(relativePath);
+        }
+        
+        container.appendChild(itemDiv);
+    });
 }
 
-function getFileIcon(filename) {
-    const ext = filename.split('.').pop().toLowerCase();
-    const iconMap = {
-        // Programming Languages
-        'js': 'fab fa-js text-yellow-400',
-        'py': 'fab fa-python text-blue-400',
-        'html': 'fab fa-html5 text-orange-500',
-        'css': 'fab fa-css3-alt text-blue-500',
-        'jsx': 'fab fa-react text-blue-400',
-        'tsx': 'fab fa-react text-blue-400',
-        'vue': 'fab fa-vuejs text-green-400',
-        'php': 'fab fa-php text-purple-400',
-        'rb': 'fas fa-gem text-red-400',
-        'java': 'fab fa-java text-red-400',
-        'kt': 'fas fa-k text-purple-400',
-        'swift': 'fab fa-swift text-orange-400',
-        'go': 'fas fa-code text-blue-400',
-        'rs': 'fas fa-gear text-orange-400',
-        
-        // Web and Config Files
-        'json': 'fas fa-code text-yellow-400',
-        'xml': 'fas fa-code text-orange-400',
-        'yaml': 'fas fa-file-code text-red-400',
-        'yml': 'fas fa-file-code text-red-400',
-        'toml': 'fas fa-file-code text-blue-400',
-        'md': 'fas fa-file-alt text-blue-400',
-        'txt': 'fas fa-file-alt text-gray-400',
-        
-        // Shell Scripts
-        'sh': 'fas fa-terminal text-green-400',
-        'bash': 'fas fa-terminal text-green-400',
-        'zsh': 'fas fa-terminal text-green-400',
-        'fish': 'fas fa-terminal text-green-400',
-        
-        // Database
-        'sql': 'fas fa-database text-blue-400',
-        'sqlite': 'fas fa-database text-blue-400',
-        'db': 'fas fa-database text-blue-400',
-        
-        // Images
-        'jpg': 'fas fa-file-image text-green-400',
-        'jpeg': 'fas fa-file-image text-green-400',
-        'png': 'fas fa-file-image text-green-400',
-        'gif': 'fas fa-file-image text-green-400',
-        'svg': 'fas fa-file-image text-green-400',
-        'webp': 'fas fa-file-image text-green-400',
-        
-        // Documents
-        'pdf': 'fas fa-file-pdf text-red-400',
-        'doc': 'fas fa-file-word text-blue-400',
-        'docx': 'fas fa-file-word text-blue-400',
-        'xls': 'fas fa-file-excel text-green-400',
-        'xlsx': 'fas fa-file-excel text-green-400',
-        'ppt': 'fas fa-file-powerpoint text-orange-400',
-        'pptx': 'fas fa-file-powerpoint text-orange-400',
-        
-        // Archives
-        'zip': 'fas fa-file-archive text-yellow-400',
-        'rar': 'fas fa-file-archive text-yellow-400',
-        '7z': 'fas fa-file-archive text-yellow-400',
-        'tar': 'fas fa-file-archive text-yellow-400',
-        'gz': 'fas fa-file-archive text-yellow-400',
-        
-        // Development
-        'gitignore': 'fab fa-git-alt text-orange-400',
-        'env': 'fas fa-key text-green-400',
-        'lock': 'fas fa-lock text-yellow-400',
-        'log': 'fas fa-file-alt text-gray-400',
-        'conf': 'fas fa-cog text-gray-400',
-        'config': 'fas fa-cog text-gray-400'
+function getFileIcon(path) {
+    const ext = path.split('.').pop().toLowerCase();
+    const filename = path.split('/').pop().toLowerCase();
+    
+    // First check for specific filenames
+    const filenameIcons = {
+        'dockerfile': 'fa-docker text-blue-400',
+        'docker-compose.yml': 'fa-docker text-blue-400',
+        'docker-compose.yaml': 'fa-docker text-blue-400',
+        '.dockerignore': 'fa-docker text-gray-400',
+        '.gitignore': 'fa-git text-gray-400',
+        '.gitattributes': 'fa-git text-gray-400',
+        '.gitmodules': 'fa-git text-gray-400',
+        '.env': 'fa-lock text-yellow-400',
+        '.env.example': 'fa-lock text-gray-400',
+        '.env.local': 'fa-lock text-yellow-400',
+        '.env.development': 'fa-lock text-green-400',
+        '.env.production': 'fa-lock text-red-400',
+        'package.json': 'fa-npm text-red-400',
+        'package-lock.json': 'fa-npm text-red-400',
+        'composer.json': 'fa-php text-purple-400',
+        'composer.lock': 'fa-php text-purple-400',
+        'requirements.txt': 'fa-python text-blue-400',
+        'pipfile': 'fa-python text-blue-400',
+        'pipfile.lock': 'fa-python text-blue-400',
+        'poetry.lock': 'fa-python text-blue-400',
+        'pyproject.toml': 'fa-python text-blue-400',
+        'cargo.toml': 'fa-cube text-brown-400',
+        'cargo.lock': 'fa-cube text-brown-400',
+        'makefile': 'fa-cogs text-gray-400',
+        'readme.md': 'fa-book text-blue-400',
+        'changelog.md': 'fa-clipboard-list text-blue-400',
+        'license': 'fa-certificate text-yellow-400',
+        'license.md': 'fa-certificate text-yellow-400',
+        'license.txt': 'fa-certificate text-yellow-400',
+        'contributing.md': 'fa-hands-helping text-blue-400',
+        'authors.md': 'fa-users text-blue-400',
+        'security.md': 'fa-shield-alt text-red-400',
+        'robots.txt': 'fa-robot text-gray-400',
+        'manifest.json': 'fa-puzzle-piece text-purple-400',
+        'browserslist': 'fa-browsers text-orange-400',
+        '.eslintrc': 'fa-lint text-purple-400',
+        '.prettierrc': 'fa-paint-brush text-pink-400',
+        '.babelrc': 'fa-babel text-yellow-400',
+        'tsconfig.json': 'fa-typescript text-blue-400',
+        'jest.config.js': 'fa-jest text-red-400',
+        'webpack.config.js': 'fa-webpack text-blue-400',
+        'vite.config.js': 'fa-vite text-yellow-400',
+        'next.config.js': 'fa-next text-black',
+        'nuxt.config.js': 'fa-nuxt text-green-400',
+        'angular.json': 'fa-angular text-red-400',
+        'vue.config.js': 'fa-vuejs text-green-400',
+        'svelte.config.js': 'fa-svelte text-orange-400'
     };
-    
-    // Check for specific filenames first
-    if (filename === '.gitignore') return '<i class="fab fa-git-alt text-orange-400 text-xl"></i>';
-    if (filename === '.env') return '<i class="fas fa-key text-green-400 text-xl"></i>';
-    if (filename.endsWith('.lock')) return '<i class="fas fa-lock text-yellow-400 text-xl"></i>';
-    if (filename.endsWith('.config')) return '<i class="fas fa-cog text-gray-400 text-xl"></i>';
-    
-    // Then check extensions
-    return `<i class="${iconMap[ext] || 'fas fa-file text-gray-400'} text-xl"></i>`;
+
+    if (filenameIcons[filename]) {
+        return filenameIcons[filename];
+    }
+
+    // Then check file extensions
+    const extensionIcons = {
+        // Web Development
+        'html': 'fa-html5 text-orange-400',
+        'htm': 'fa-html5 text-orange-400',
+        'xhtml': 'fa-html5 text-orange-400',
+        'css': 'fa-css3 text-blue-400',
+        'scss': 'fa-sass text-pink-400',
+        'sass': 'fa-sass text-pink-400',
+        'less': 'fa-less text-blue-400',
+        'styl': 'fa-stylus text-green-400',
+        'js': 'fa-js text-yellow-400',
+        'jsx': 'fa-react text-blue-400',
+        'cjs': 'fa-node text-green-400',
+        'mjs': 'fa-node text-green-400',
+        'ts': 'fa-typescript text-blue-400',
+        'tsx': 'fa-react text-blue-400',
+        'vue': 'fa-vuejs text-green-400',
+        'svelte': 'fa-svelte text-orange-400',
+        'php': 'fa-php text-purple-400',
+        'phtml': 'fa-php text-purple-400',
+        'rb': 'fa-gem text-red-400',
+        'erb': 'fa-gem text-red-400',
+        'py': 'fa-python text-blue-400',
+        'pyc': 'fa-python text-gray-400',
+        'pyo': 'fa-python text-gray-400',
+        'pyd': 'fa-python text-gray-400',
+        'java': 'fa-java text-red-400',
+        'class': 'fa-java text-red-400',
+        'jar': 'fa-java text-red-400',
+        'war': 'fa-java text-red-400',
+        'jsp': 'fa-java text-red-400',
+        'go': 'fa-golang text-blue-400',
+        'rs': 'fa-rust text-brown-400',
+        'rlib': 'fa-rust text-brown-400',
+        'swift': 'fa-swift text-orange-400',
+        'kt': 'fa-kotlin text-purple-400',
+        'kts': 'fa-kotlin text-purple-400',
+        'dart': 'fa-dart text-blue-400',
+        'coffee': 'fa-coffee text-brown-400',
+        'elm': 'fa-elm text-blue-400',
+        'erl': 'fa-erlang text-red-400',
+        'ex': 'fa-elixir text-purple-400',
+        'exs': 'fa-elixir text-purple-400',
+        'fs': 'fa-microsoft text-purple-400',
+        'fsx': 'fa-microsoft text-purple-400',
+        'fsi': 'fa-microsoft text-purple-400',
+        'rs': 'fa-rust text-brown-400',
+        'rlib': 'fa-rust text-brown-400',
+
+        // Data & Config
+        'json': 'fa-code text-yellow-400',
+        'yaml': 'fa-file-code text-red-400',
+        'yml': 'fa-file-code text-red-400',
+        'xml': 'fa-file-code text-orange-400',
+        'toml': 'fa-file-code text-gray-400',
+        'ini': 'fa-cog text-gray-400',
+        'conf': 'fa-cog text-gray-400',
+        'config': 'fa-cog text-gray-400',
+        'sql': 'fa-database text-blue-400',
+        'sqlite': 'fa-database text-blue-400',
+        'db': 'fa-database text-blue-400',
+        'mdb': 'fa-database text-blue-400',
+        'pdb': 'fa-database text-blue-400',
+        'graphql': 'fa-project-diagram text-pink-400',
+        'gql': 'fa-project-diagram text-pink-400',
+        'prisma': 'fa-database text-blue-400',
+        'csv': 'fa-file-csv text-green-400',
+        'tsv': 'fa-file-alt text-green-400',
+        'properties': 'fa-cog text-gray-400',
+
+        // Shell Scripts
+        'sh': 'fa-terminal text-green-400',
+        'bash': 'fa-terminal text-green-400',
+        'zsh': 'fa-terminal text-green-400',
+        'fish': 'fa-terminal text-green-400',
+        'ps1': 'fa-terminal text-blue-400',
+        'psm1': 'fa-terminal text-blue-400',
+        'psd1': 'fa-terminal text-blue-400',
+        'bat': 'fa-terminal text-blue-400',
+        'cmd': 'fa-terminal text-blue-400',
+        'reg': 'fa-windows text-blue-400',
+
+        // Documents
+        'md': 'fa-markdown text-white',
+        'mdx': 'fa-markdown text-blue-400',
+        'txt': 'fa-file-alt text-gray-400',
+        'rtf': 'fa-file-alt text-blue-400',
+        'pdf': 'fa-file-pdf text-red-400',
+        'doc': 'fa-file-word text-blue-400',
+        'docx': 'fa-file-word text-blue-400',
+        'docm': 'fa-file-word text-blue-400',
+        'xls': 'fa-file-excel text-green-400',
+        'xlsx': 'fa-file-excel text-green-400',
+        'xlsm': 'fa-file-excel text-green-400',
+        'ppt': 'fa-file-powerpoint text-orange-400',
+        'pptx': 'fa-file-powerpoint text-orange-400',
+        'pptm': 'fa-file-powerpoint text-orange-400',
+        'odt': 'fa-file-alt text-blue-400',
+        'ods': 'fa-file-alt text-green-400',
+        'odp': 'fa-file-alt text-orange-400',
+        'pages': 'fa-apple text-blue-400',
+        'numbers': 'fa-apple text-green-400',
+        'keynote': 'fa-apple text-orange-400',
+        'tex': 'fa-tex text-green-400',
+        'latex': 'fa-tex text-green-400',
+        'rst': 'fa-file-alt text-blue-400',
+        'adoc': 'fa-file-alt text-blue-400',
+        'epub': 'fa-book text-blue-400',
+        'mobi': 'fa-book text-orange-400',
+
+        // Images
+        'jpg': 'fa-file-image text-pink-400',
+        'jpeg': 'fa-file-image text-pink-400',
+        'png': 'fa-file-image text-green-400',
+        'gif': 'fa-file-image text-purple-400',
+        'bmp': 'fa-file-image text-gray-400',
+        'svg': 'fa-file-image text-orange-400',
+        'svgz': 'fa-file-image text-orange-400',
+        'ico': 'fa-file-image text-blue-400',
+        'webp': 'fa-file-image text-blue-400',
+        'tif': 'fa-file-image text-purple-400',
+        'tiff': 'fa-file-image text-purple-400',
+        'psd': 'fa-adobe text-blue-400',
+        'psb': 'fa-adobe text-blue-400',
+        'ai': 'fa-adobe text-orange-400',
+        'eps': 'fa-adobe text-orange-400',
+        'raw': 'fa-camera text-gray-400',
+        'cr2': 'fa-camera text-gray-400',
+        'nef': 'fa-camera text-gray-400',
+        'sketch': 'fa-pencil-ruler text-yellow-400',
+        'fig': 'fa-pencil-ruler text-purple-400',
+        'xcf': 'fa-paint-brush text-orange-400',
+        'heic': 'fa-file-image text-blue-400',
+        'heif': 'fa-file-image text-blue-400',
+
+        // Audio & Video
+        'mp3': 'fa-file-audio text-purple-400',
+        'wav': 'fa-file-audio text-blue-400',
+        'ogg': 'fa-file-audio text-blue-400',
+        'flac': 'fa-file-audio text-green-400',
+        'aac': 'fa-file-audio text-red-400',
+        'm4a': 'fa-file-audio text-red-400',
+        'wma': 'fa-file-audio text-blue-400',
+        'aiff': 'fa-file-audio text-gray-400',
+        'mp4': 'fa-file-video text-red-400',
+        'avi': 'fa-file-video text-blue-400',
+        'mov': 'fa-file-video text-blue-400',
+        'wmv': 'fa-file-video text-blue-400',
+        'flv': 'fa-file-video text-red-400',
+        'webm': 'fa-file-video text-green-400',
+        'mkv': 'fa-file-video text-purple-400',
+        'm4v': 'fa-file-video text-red-400',
+        'mpg': 'fa-file-video text-blue-400',
+        'mpeg': 'fa-file-video text-blue-400',
+        '3gp': 'fa-file-video text-gray-400',
+
+        // Archives
+        'zip': 'fa-file-archive text-yellow-400',
+        'rar': 'fa-file-archive text-purple-400',
+        '7z': 'fa-file-archive text-gray-400',
+        'tar': 'fa-file-archive text-brown-400',
+        'gz': 'fa-file-archive text-red-400',
+        'bz2': 'fa-file-archive text-red-400',
+        'xz': 'fa-file-archive text-blue-400',
+        'iso': 'fa-compact-disc text-gray-400',
+        'dmg': 'fa-apple text-gray-400',
+        'pkg': 'fa-box text-blue-400',
+        'deb': 'fa-ubuntu text-orange-400',
+        'rpm': 'fa-fedora text-blue-400',
+
+        // Development
+        'c': 'fa-file-code text-blue-400',
+        'h': 'fa-file-code text-blue-400',
+        'cpp': 'fa-file-code text-blue-400',
+        'hpp': 'fa-file-code text-blue-400',
+        'cc': 'fa-file-code text-blue-400',
+        'hh': 'fa-file-code text-blue-400',
+        'cs': 'fa-microsoft text-purple-400',
+        'csx': 'fa-microsoft text-purple-400',
+        'vb': 'fa-microsoft text-blue-400',
+        'fs': 'fa-microsoft text-purple-400',
+        'm': 'fa-apple text-gray-400',
+        'mm': 'fa-apple text-gray-400',
+        'swift': 'fa-apple text-orange-400',
+        'r': 'fa-chart-line text-blue-400',
+        'rmd': 'fa-chart-line text-blue-400',
+        'matlab': 'fa-chart-line text-orange-400',
+        'pl': 'fa-code text-blue-400',
+        'pm': 'fa-code text-blue-400',
+        'lua': 'fa-moon text-blue-400',
+        'clj': 'fa-code text-green-400',
+        'scala': 'fa-code text-red-400',
+        'erl': 'fa-code text-red-400',
+        'ex': 'fa-code text-purple-400',
+        'exs': 'fa-code text-purple-400',
+        'hx': 'fa-code text-orange-400',
+        'hs': 'fa-code text-purple-400',
+        'idr': 'fa-code text-red-400',
+        'ml': 'fa-code text-orange-400',
+        'mli': 'fa-code text-orange-400',
+        'rkt': 'fa-code text-red-400',
+        'elm': 'fa-leaf text-blue-400',
+
+        // Other
+        'log': 'fa-file-alt text-gray-400',
+        'lock': 'fa-lock text-yellow-400',
+        'key': 'fa-key text-yellow-400',
+        'pem': 'fa-key text-green-400',
+        'crt': 'fa-certificate text-green-400',
+        'cer': 'fa-certificate text-green-400',
+        'p12': 'fa-certificate text-purple-400',
+        'pfx': 'fa-certificate text-purple-400',
+        'pub': 'fa-key text-yellow-400',
+        'gpg': 'fa-key text-red-400',
+        'asc': 'fa-key text-gray-400',
+        'enc': 'fa-lock text-red-400',
+        'sig': 'fa-signature text-blue-400',
+        'sum': 'fa-check-double text-green-400',
+        'md5': 'fa-check-double text-blue-400',
+        'sha1': 'fa-check-double text-blue-400',
+        'sha256': 'fa-check-double text-blue-400',
+        'tmp': 'fa-clock text-gray-400',
+        'temp': 'fa-clock text-gray-400',
+        'cache': 'fa-database text-gray-400',
+        'bak': 'fa-history text-gray-400',
+        'old': 'fa-history text-gray-400',
+        'orig': 'fa-history text-gray-400',
+        'swp': 'fa-history text-gray-400',
+        'dist': 'fa-box text-blue-400',
+        'min': 'fa-compress-arrows-alt text-blue-400',
+        'map': 'fa-map text-green-400',
+        'flow': 'fa-project-diagram text-blue-400',
+        'test': 'fa-vial text-green-400',
+        'spec': 'fa-vial text-green-400'
+    };
+
+    return extensionIcons[ext] || 'fa-file-code text-gray-400';
 }
 
 // Code Generation
@@ -1174,7 +1375,7 @@ async function showFileContent(filePath) {
     const modal = document.getElementById('approvalModal');
     const preview = document.getElementById('changesPreview');
     const modalTitle = modal.querySelector('.modal-header h2');
-    const modalFooter = modal.querySelector('.modal-footer .flex');
+    const modalFooter = document.getElementById('modalFooter');
 
     modalTitle.textContent = filePath.split('/').pop();
     preview.innerHTML = '<div class="text-center p-4"><i class="fas fa-spinner fa-spin mr-2"></i>Loading file...</div>';
@@ -1182,42 +1383,54 @@ async function showFileContent(filePath) {
     modal.classList.remove('hidden');
 
     try {
+        // Ensure we're using a clean relative path
+        const relativePath = filePath.replace(/^[\/\\]+/, '');
+            
+        console.log('Current workspace:', currentWorkspace);  // Debug log
+        console.log('Original file path:', filePath);  // Debug log
+        console.log('Relative path:', relativePath);  // Debug log
+
         const response = await fetch('/workspace/file', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 workspace_dir: currentWorkspace,
-                file_path: filePath
+                file_path: relativePath
             })
         });
 
         const data = await response.json();
+        console.log('File content response:', data);  // Debug log
         
         if (data.status === 'success') {
+            // Clear previous content
             preview.innerHTML = '';
 
             // Create the main container
             const container = document.createElement('div');
-            container.className = 'file-preview-container';
+            container.className = 'file-preview-container h-full flex flex-col';
             
             // File info header
             const fileInfo = document.createElement('div');
-            fileInfo.className = 'file-info-header';
+            fileInfo.className = 'file-info-header mb-4 p-4 bg-gray-700 rounded-lg';
             
+            // Handle file size display
             const fileSize = formatFileSize(data.file_size);
-            const truncatedWarning = data.truncated 
+            console.log('File size:', data.file_size, 'Formatted:', fileSize);  // Debug log
+            
+            const fileSizeDisplay = data.truncated 
                 ? `<p class="text-yellow-400 text-sm mt-1">File is large (${fileSize}). Showing preview of first 1000 lines.</p>` 
                 : `<p class="text-gray-400 text-sm mt-1">File size: ${fileSize}</p>`;
             
             fileInfo.innerHTML = `
                 <div class="flex items-center gap-3">
-                    ${getFileIcon(filePath)}
+                    <i class="fas ${getFileIcon(filePath)}"></i>
                     <div class="flex-1">
                         <div class="flex items-center gap-2">
                             <h3 class="text-lg font-medium">${filePath.split('/').pop()}</h3>
                         </div>
-                        <p class="text-sm text-gray-400">${filePath}</p>
-                        ${truncatedWarning}
+                        <p class="text-sm text-gray-400">${relativePath}</p>
+                        ${fileSizeDisplay}
                     </div>
                 </div>
             `;
@@ -1225,22 +1438,32 @@ async function showFileContent(filePath) {
 
             // File content container
             const contentContainer = document.createElement('div');
-            contentContainer.className = 'file-content-container';
+            contentContainer.className = 'file-content-container flex-1 bg-gray-800 rounded-lg overflow-hidden';
+            contentContainer.style.minHeight = '400px';
             
-            // Create editor
+            // Create editor container
             const editorDiv = document.createElement('div');
-            editorDiv.style.height = '100%';
+            editorDiv.className = 'h-full';
+            editorDiv.style.minHeight = '400px';
             
+            // Create textarea with content
             const textarea = document.createElement('textarea');
-            textarea.value = data.content;
+            if (data.content !== undefined && data.content !== null) {
+                textarea.value = data.content;
+                console.log('Content length:', data.content.length);  // Debug log
+            } else {
+                console.warn('No content received from server');  // Debug log
+                textarea.value = '';
+            }
+            
             editorDiv.appendChild(textarea);
             contentContainer.appendChild(editorDiv);
             container.appendChild(contentContainer);
             
             preview.appendChild(container);
 
-            // Initialize CodeMirror
-            CodeMirror.fromTextArea(textarea, {
+            // Initialize CodeMirror with specific height
+            const editor = CodeMirror.fromTextArea(textarea, {
                 mode: getLanguageMode(filePath),
                 theme: 'monokai',
                 lineNumbers: true,
@@ -1249,17 +1472,27 @@ async function showFileContent(filePath) {
                 readOnly: true,
                 scrollbarStyle: 'overlay',
                 lineWrapping: true,
-                viewportMargin: Infinity
+                viewportMargin: Infinity,
+                height: '400px'
             });
 
-            // Add close button
+            // Set editor size and force refresh
+            editor.setSize('100%', '400px');
+            editor.refresh();  // Immediate refresh
+            setTimeout(() => {
+                editor.refresh();  // Additional refresh after a short delay
+                console.log('Editor refreshed');  // Debug log
+            }, 100);
+
+            // Add close button to footer
             const closeBtn = document.createElement('button');
             closeBtn.className = 'btn btn-secondary';
             closeBtn.innerHTML = '<i class="fas fa-times mr-2"></i>Close';
             closeBtn.onclick = hideModal;
             modalFooter.appendChild(closeBtn);
         } else {
-            preview.innerHTML = '<div class="text-center text-red-500 p-4">Failed to load file content</div>';
+            console.error('Error response:', data.message);  // Debug log
+            preview.innerHTML = `<div class="text-center text-red-500 p-4">Failed to load file content: ${data.message || 'Unknown error'}</div>`;
         }
     } catch (error) {
         console.error('Error:', error);
@@ -1268,8 +1501,12 @@ async function showFileContent(filePath) {
 }
 
 function formatFileSize(bytes) {
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let size = bytes;
+    if (bytes === undefined || bytes === null || bytes === 0) {
+        return 'Empty file';
+    }
+    
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = Math.abs(bytes);  // Ensure positive number
     let unitIndex = 0;
     
     while (size >= 1024 && unitIndex < units.length - 1) {
@@ -1443,8 +1680,12 @@ function addAttachmentToContainer(fileName, content, container, type) {
 }
 
 function formatFileSize(bytes) {
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let size = bytes;
+    if (bytes === undefined || bytes === null || bytes === 0) {
+        return 'Empty file';
+    }
+    
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = Math.abs(bytes);  // Ensure positive number
     let unitIndex = 0;
     
     while (size >= 1024 && unitIndex < units.length - 1) {
