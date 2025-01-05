@@ -119,15 +119,15 @@
                         Code Generation
                     </h2>
                     <div class="flex flex-col gap-2">
-                        <div class="flex items-start gap-2">
+                        <div class="flex items-center gap-2">
                             <textarea id="promptInput" rows="2" 
-                                class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none text-black"
+                                class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none text-black h-[74px]"
                                 placeholder="Describe what you want to create or modify..."></textarea>
-                            <div class="flex flex-col gap-2">
-                                <label for="codeAttachment" class="legacy-btn legacy-btn-secondary legacy-btn-sm">
+                            <div class="flex flex-col items-center justify-center gap-2 self-stretch">
+                                <label for="codeAttachment" class="legacy-btn legacy-btn-secondary legacy-btn-sm flex items-center justify-center">
                                     <i class="fas fa-paperclip"></i>
                                 </label>
-                                <button onclick="processPrompt()" class="legacy-btn legacy-btn-primary legacy-btn-sm">
+                                <button onclick="processPrompt()" class="legacy-btn legacy-btn-purple legacy-btn-sm flex items-center justify-center">
                                     <i class="fas fa-magic"></i>
                                 </button>
                                 <input type="file" id="codeAttachment" class="hidden" multiple>
@@ -168,15 +168,15 @@
                 <!-- Chat Input -->
                 <div class="p-2 border-t border-[#3e3e42] flex-none">
                     <div id="chatAttachments" class="space-y-1 mb-2"></div>
-                    <div class="flex items-start gap-2">
+                    <div class="flex items-center gap-2">
                         <textarea id="chatInput" 
-                            class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none h-[80px] overflow-y-auto text-black"
+                            class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none text-black h-[74px] overflow-y-auto"
                             placeholder="Ask a question about your code..."></textarea>
-                        <div class="flex flex-col gap-2">
-                            <label for="chatAttachment" class="legacy-btn legacy-btn-secondary legacy-btn-sm">
+                        <div class="flex flex-col items-center justify-center gap-2 self-stretch">
+                            <label for="chatAttachment" class="legacy-btn legacy-btn-secondary legacy-btn-sm flex items-center justify-center">
                                 <i class="fas fa-paperclip"></i>
                             </label>
-                            <button onclick="sendChatMessage()" class="legacy-btn legacy-btn-primary legacy-btn-sm">
+                            <button onclick="sendChatMessage()" class="legacy-btn legacy-btn-purple legacy-btn-sm flex items-center justify-center">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
                             <input type="file" id="chatAttachment" class="hidden" multiple>

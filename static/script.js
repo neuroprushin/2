@@ -246,7 +246,7 @@ async function loadWorkspaceHistory() {
                 if (isImported) {
                     // Show Unlink button for imported workspaces
                     const unlinkBtn = document.createElement('button');
-                    unlinkBtn.className = 'p-2 text-blue-400 hover:text-blue-300 transition-colors';
+                    unlinkBtn.className = 'p-2 text-red-400 hover:text-red-300 transition-colors';
                     unlinkBtn.innerHTML = '<i class="fas fa-unlink"></i>';
                     unlinkBtn.title = 'Unlink workspace';
                     unlinkBtn.onclick = (e) => {
@@ -354,53 +354,6 @@ async function renameWorkspace(workspaceId, newName) {
         console.error('Error:', error);
         showError('Failed to rename workspace: ' + error.message);
     }
-}
-
-function createWorkspaceHistoryItem(workspace) {
-    const workspaceDiv = document.createElement('div');
-    workspaceDiv.className = 'flex items-center justify-between p-3 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors cursor-pointer';
-    workspaceDiv.onclick = () => selectWorkspace(workspace.path);
-
-    const info = document.createElement('div');
-    info.className = 'flex-1';
-    
-    const name = document.createElement('div');
-    name.className = 'font-medium truncate';
-    name.textContent = workspace.id;
-    
-    const date = document.createElement('div');
-    date.className = 'text-sm text-gray-400';
-    date.textContent = new Date(workspace.created_at).toLocaleString();
-    
-    const controls = document.createElement('div');
-    controls.className = 'flex items-center gap-2 ml-3';
-    
-    const fileCount = document.createElement('span');
-    fileCount.className = 'text-sm text-gray-400';
-    fileCount.textContent = `${workspace.file_count} files`;
-    
-    const renameBtn = createButton('fas fa-edit', 'text-gray-400 hover:text-blue-400', () => {
-        const newName = prompt('Enter new workspace name:', workspace.id);
-        if (newName && newName !== workspace.id) {
-            renameWorkspace(workspace.id, newName);
-        }
-    });
-    
-    const deleteBtn = createButton('fas fa-trash', 'text-gray-400 hover:text-red-400', () => {
-        if (confirm('Are you sure you want to delete this workspace?')) {
-            deleteWorkspace(workspace.id);
-        }
-    });
-
-    info.appendChild(name);
-    info.appendChild(date);
-    controls.appendChild(fileCount);
-    controls.appendChild(renameBtn);
-    controls.appendChild(deleteBtn);
-    workspaceDiv.appendChild(info);
-    workspaceDiv.appendChild(controls);
-
-    return workspaceDiv;
 }
 
 function createButton(iconClass, buttonClass, onClick) {
@@ -962,15 +915,17 @@ function showApprovalModal(data) {
         }
     } else {
         // For code changes preview
-        if (data.explanation) {
-            appendExplanation(preview, data.explanation);
+        const suggestions = data.suggestions || {};
+        
+        if (suggestions.explanation) {
+            appendExplanation(preview, suggestions.explanation);
         }
 
-        if (data.operations) {
-            data.operations.forEach(operation => {
+        if (suggestions.operations) {
+            suggestions.operations.forEach(operation => {
                 appendOperation(preview, operation);
             });
-            appendModalButtons(footer, data.operations);
+            appendModalButtons(footer, suggestions.operations);
         }
     }
 
@@ -991,36 +946,77 @@ function appendOperation(container, operation) {
     const operationDiv = document.createElement('div');
     operationDiv.className = 'mb-8 bg-gray-700 rounded-lg p-4';
 
-    appendOperationHeader(operationDiv, operation);
-    appendOperationContent(operationDiv, operation);
-
-    container.appendChild(operationDiv);
-}
-
-function appendOperationHeader(container, operation) {
+    // Operation header
     const header = document.createElement('div');
-    header.className = 'operation-header flex items-center gap-2 mb-2';
+    header.className = 'operation-header flex items-center justify-between mb-4';
+    
+    // Left side: icon and title
+    const leftSide = document.createElement('div');
+    leftSide.className = 'flex items-center gap-2';
     
     // Icon based on operation type
     const icon = document.createElement('i');
-    icon.className = getOperationIcon(operation.type);
-    header.appendChild(icon);
+    icon.className = `fas ${getOperationIcon(operation.type)}`;
+    leftSide.appendChild(icon);
     
     // Operation title
     const title = document.createElement('span');
     title.className = 'font-medium';
     title.textContent = formatOperationTitle(operation);
-    header.appendChild(title);
-
-    // Add linter status icon if available
+    leftSide.appendChild(title);
+    
+    header.appendChild(leftSide);
+    
+    // Right side: linter status
     if (operation.linter_status !== undefined) {
-        const linterIcon = document.createElement('i');
-        linterIcon.className = operation.linter_status ? 'fas fa-check-circle text-green-500 ml-2' : 'fas fa-exclamation-circle text-red-500 ml-2';
-        linterIcon.title = operation.linter_status ? 'Linter passed' : 'Linter failed';
-        header.appendChild(linterIcon);
+        const linterStatus = document.createElement('div');
+        linterStatus.className = 'flex items-center gap-2';
+        linterStatus.innerHTML = `
+            <i class="fas fa-${operation.linter_status ? 'check' : 'exclamation-triangle'} text-${operation.linter_status ? 'green' : 'yellow'}-500"></i>
+            <span class="text-sm text-${operation.linter_status ? 'green' : 'yellow'}-500">
+                ${operation.linter_status ? 'Linter passed' : 'Linter warnings'}
+            </span>
+        `;
+        header.appendChild(linterStatus);
     }
 
-    container.appendChild(header);
+    operationDiv.appendChild(header);
+
+    // Operation content
+    if (operation.type === 'edit_file') {
+        if (operation.diff) {
+            const diffDiv = document.createElement('div');
+            diffDiv.className = 'bg-gray-900 rounded-lg p-4 font-mono text-sm whitespace-pre overflow-x-auto';
+            
+            const formattedDiff = operation.diff.split('\n').map(line => {
+                if (!line) return '<span class="text-gray-400">\n</span>';  // Show empty lines
+                if (line.startsWith('+')) {
+                    return `<span class="text-green-500">${escapeHtml(line)}</span>`;
+                } else if (line.startsWith('-')) {
+                    return `<span class="text-red-500">${escapeHtml(line)}</span>`;
+                } else if (line.startsWith('@@')) {
+                    return `<span class="text-gray-500">${escapeHtml(line)}</span>`;
+                } else {
+                    return `<span class="text-gray-400">${escapeHtml(line)}</span>`;
+                }
+            }).join('\n');  // Keep newlines between lines
+            
+            diffDiv.innerHTML = formattedDiff;
+            operationDiv.appendChild(diffDiv);
+        } else if (operation.content) {
+            const codeDiv = document.createElement('div');
+            codeDiv.className = 'bg-gray-900 rounded-lg p-4 font-mono text-sm whitespace-pre overflow-x-auto';
+            codeDiv.innerHTML = `<code class="language-${getLanguageMode(operation.path)}">${escapeHtml(operation.content)}</code>`;
+            operationDiv.appendChild(codeDiv);
+        }
+    } else if (operation.type === 'create_file' && operation.content) {
+        const codeDiv = document.createElement('div');
+        codeDiv.className = 'bg-gray-900 rounded-lg p-4 font-mono text-sm whitespace-pre overflow-x-auto';
+        codeDiv.innerHTML = `<code class="language-${getLanguageMode(operation.path)}">${escapeHtml(operation.content)}</code>`;
+        operationDiv.appendChild(codeDiv);
+    }
+
+    container.appendChild(operationDiv);
 }
 
 function getOperationIcon(type) {
@@ -1034,69 +1030,6 @@ function getOperationIcon(type) {
 
 function formatOperationTitle(operation) {
     return `${operation.type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}: ${operation.path}`;
-}
-
-function appendOperationContent(container, operation) {
-    if (operation.type === 'edit_file' && operation.diff) {
-        appendDiffView(container, operation.diff);
-    } else if (operation.content) {
-        // For new files or files without diff
-        const codeDiv = document.createElement('div');
-        codeDiv.className = 'bg-gray-900 rounded-lg p-4 font-mono text-sm whitespace-pre overflow-x-auto';
-        
-        // Clean up the content
-        let code = operation.content.trim()
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-            
-        // Get language for syntax highlighting
-        const language = getLanguageMode(operation.path);
-        codeDiv.innerHTML = `<code class="language-${language}">${code}</code>`;
-        container.appendChild(codeDiv);
-    }
-}
-
-function appendDiffView(container, diff) {
-    const diffDiv = document.createElement('div');
-    diffDiv.className = 'bg-gray-900 rounded-lg p-4 font-mono text-sm whitespace-pre';
-    
-    const formattedDiff = diff.split('\n').map(line => {
-        if (line.startsWith('+')) {
-            return `<span class="text-green-500">${escapeHtml(line)}</span>`;
-        } else if (line.startsWith('-')) {
-            return `<span class="text-red-500">${escapeHtml(line)}</span>`;
-        } else if (line.startsWith('@@')) {
-            return `<span class="text-gray-500">${escapeHtml(line)}</span>`;
-        } else {
-            return `<span class="text-gray-300">${escapeHtml(line)}</span>`;
-        }
-    }).join('\n');
-    
-    diffDiv.innerHTML = formattedDiff;
-    container.appendChild(diffDiv);
-}
-
-function appendCodeEditor(container, operation) {
-    const editorDiv = document.createElement('div');
-    editorDiv.style.height = '400px';
-    editorDiv.className = 'relative';
-    
-    const textarea = document.createElement('textarea');
-    textarea.value = operation.content;
-    editorDiv.appendChild(textarea);
-    container.appendChild(editorDiv);
-
-    CodeMirror.fromTextArea(textarea, {
-        mode: getLanguageMode(operation.path),
-        theme: 'monokai',
-        lineNumbers: true,
-        matchBrackets: true,
-        styleActiveLine: true,
-        scrollbarStyle: 'overlay',
-        readOnly: true
-    });
 }
 
 function appendModalButtons(footer, operations) {
@@ -1224,6 +1157,7 @@ async function applyChanges(operations) {
             if (data.structure) {
                 updateWorkspaceTree(data.structure);
             }
+            showError('Changes applied successfully', 'success');
         } else {
             showError(data.message || 'Failed to apply changes');
         }

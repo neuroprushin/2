@@ -636,61 +636,66 @@ textarea:focus {
     padding: 0;
 }
 
-/* Tree View Specific Styles (Legacy Support) */
-.legacy-tree-item {
-    display: flex;
-    align-items: center;
-    padding: 4px 8px;
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-
-.legacy-tree-item:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
-.legacy-tree-item .icon {
-    margin-right: 8px;
-    position: relative;
-}
-
-.legacy-tree-item.imported-folder {
-    background-color: rgba(0, 128, 255, 0.1);
-    border-left: 3px solid #0080ff;
-}
-
-.legacy-import-badge {
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    background-color: #0080ff;
-    color: white;
-    border-radius: 50%;
-    width: 14px;
-    height: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 8px;
-}
-
-.legacy-import-badge i {
-    font-size: 8px;
-}
-
 /* Additional Button Styles (Legacy Support) */
 .legacy-btn {
-    @apply px-4 py-2 rounded-lg font-medium transition-colors;
+    padding: 1rem 1.5rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
 }
 
 .legacy-btn-primary {
-    @apply bg-blue-500 text-white hover:bg-blue-600;
+    background-color: #2563eb;
+    color: white;
+}
+
+.legacy-btn-primary:hover {
+    background-color: #1d4ed8;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
 }
 
 .legacy-btn-secondary {
-    @apply bg-gray-600 text-white hover:bg-gray-700;
+    background-color: #4b5563;
+    color: white;
+}
+
+.legacy-btn-secondary:hover {
+    background-color: #374151;
+}
+
+.legacy-btn-success {
+    background-color: #2563eb;
+    color: white;
+}
+
+.legacy-btn-success:hover {
+    background-color: #1d4ed8;
+}
+
+.legacy-btn-purple {
+    background-color: #2563eb;
+    color: white;
+}
+
+.legacy-btn-purple:hover {
+    background-color: #1d4ed8;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+}
+
+.legacy-btn-danger {
+    background-color: #dc2626;
+    color: white;
+}
+
+.legacy-btn-danger:hover {
+    background-color: #b91c1c;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
 }
 
 .legacy-btn-sm {
-    @apply px-2 py-1 text-sm;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
 } 
