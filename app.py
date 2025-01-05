@@ -1137,7 +1137,16 @@ The response MUST be a valid JSON object with this exact structure:
     ]
 }
 
-IMPORTANT: Return ONLY the JSON object, with no additional text or code blocks."""
+IMPORTANT: 
+1. Return ONLY the JSON object, with no additional text or code blocks
+2. Ensure all content fields are complete and not truncated
+3. For create_file operations, include the complete file content
+4. For edit_file operations, ensure both 'old' and 'new' fields are complete
+5. Do not truncate any content in the middle of a line or field
+6. Complete all strings and fields - do not leave any content incomplete
+7. If a field would be too long, break it into multiple smaller changes instead
+8. Do not use ellipsis (...) or backslashes (\\) at the end of content
+9. Each change should be a complete, self-contained unit"""
 
         socketio.emit('status', {'message': 'Sending request to AI...', 'step': 2})
         print("\nSending analysis request...")
@@ -1148,7 +1157,7 @@ IMPORTANT: Return ONLY the JSON object, with no additional text or code blocks."
                 system=system_prompt,
                 messages=[{"role": "user", "content": analysis_prompt}],
                 temperature=0.7,
-                max_tokens=4096
+                max_tokens=8192  # Maximum allowed tokens
             )
             # Claude doesn't need streaming for this use case
             full_text = response.content[0].text
@@ -1158,26 +1167,17 @@ IMPORTANT: Return ONLY the JSON object, with no additional text or code blocks."
                 {"role": "user", "content": analysis_prompt}
             ]
             
+            # Use non-streaming mode for better reliability
             response = client.chat.completions.create(
                 model=model_config['models']['code'],
                 messages=messages,
                 temperature=0.7,
-                stream=True
+                max_tokens=8192,  # Maximum allowed tokens
+                stream=False  # Disable streaming for complete responses
             )
             
-            response_chunks = []
-            tokens_received = 0
-            for chunk in response:
-                if chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    response_chunks.append(content)
-                    tokens_received += len(content.split())
-                    socketio.emit('progress', {
-                        'message': f'Received {tokens_received} tokens...',
-                        'tokens': tokens_received
-                    })
-            full_text = ''.join(response_chunks)
-        
+            full_text = response.choices[0].message.content
+
         socketio.emit('status', {'message': 'Processing AI response...', 'step': 3})
         print("\n=== Step 2: Processing response ===")
         print("\nFull response length:", len(full_text))
@@ -1186,29 +1186,84 @@ IMPORTANT: Return ONLY the JSON object, with no additional text or code blocks."
         # Clean up the response text
         cleaned_text = full_text.strip()
         
-        # Remove any markdown code block markers
-        if cleaned_text.startswith('```') and cleaned_text.endswith('```'):
-            cleaned_text = cleaned_text[3:-3].strip()
-        if cleaned_text.startswith('```json') and cleaned_text.endswith('```'):
-            cleaned_text = cleaned_text[7:-3].strip()
+        # Remove any markdown code block markers more carefully
+        if cleaned_text.startswith('```'):
+            # Find the first newline after the opening ```
+            first_newline = cleaned_text.find('\n')
+            if first_newline != -1:
+                # Remove everything before the first newline (including ```json or just ```)
+                cleaned_text = cleaned_text[first_newline:].strip()
+            # Remove the closing ```
+            if cleaned_text.endswith('```'):
+                cleaned_text = cleaned_text[:-3].strip()
+        
+        # Check for obvious truncation
+        if '...' in cleaned_text or cleaned_text.rstrip().endswith('\\'):
+            raise ValueError("Response appears to be truncated. Please try again with a smaller change set.")
         
         # Try to parse the cleaned response
         try:
             result = json.loads(cleaned_text)
             if isinstance(result, dict) and 'operations' in result:
+                # Validate all operations
+                for op in result['operations']:
+                    # Validate path exists
+                    if 'path' not in op:
+                        raise ValueError("Operation missing path field")
+                        
+                    if op['type'] == 'create_file':
+                        # Validate content exists and is complete
+                        if 'content' not in op:
+                            raise ValueError(f"Create operation missing content field for {op['path']}")
+                        if not op['content'].strip():
+                            raise ValueError(f"Empty content for {op['path']}")
+                        # Check for incomplete content
+                        if '...' in op['content'] or op['content'].rstrip().endswith('\\'):
+                            raise ValueError(f"Content appears to be truncated in {op['path']}")
+                            
+                    elif op['type'] == 'edit_file':
+                        if 'changes' not in op:
+                            raise ValueError(f"Edit operation missing changes array for {op['path']}")
+                        for i, change in enumerate(op['changes']):
+                            # Validate both fields exist
+                            if 'old' not in change or 'new' not in change:
+                                raise ValueError(f"Change {i} missing old/new fields in {op['path']}")
+                            # Validate fields are complete
+                            if not change['old'].strip() or not change['new'].strip():
+                                raise ValueError(f"Empty old/new fields in change {i} of {op['path']}")
+                            # Check for incomplete content
+                            if '...' in change['old'] or '...' in change['new']:
+                                raise ValueError(f"Content appears to be truncated in change {i} of {op['path']}")
+                            if change['old'].rstrip().endswith('\\') or change['new'].rstrip().endswith('\\'):
+                                raise ValueError(f"Content appears to be truncated in change {i} of {op['path']}")
+                    # Validate explanation exists
+                    if 'explanation' not in op:
+                        raise ValueError(f"Operation missing explanation field for {op['path']}")
+                    # Validate explanation is complete
+                    if not op['explanation'].strip():
+                        raise ValueError(f"Empty explanation field for {op['path']}")
+                    if '...' in op['explanation'] or op['explanation'].rstrip().endswith('\\'):
+                        raise ValueError(f"Explanation appears to be truncated for {op['path']}")
                 return result
-        except json.JSONDecodeError:
-            # If direct parsing fails, try to find a JSON object in the text
-            matches = re.finditer(r'\{(?:[^{}]|(?R))*\}', cleaned_text)
-            for match in matches:
-                try:
-                    json_str = match.group(0)
-                    result = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error: {str(e)}")  # Debug log
+            print(f"Problematic text: {cleaned_text}")  # Debug log
+            
+            # Try to extract just the JSON part if there's extra text
+            try:
+                # Find the first { and last }
+                start = cleaned_text.find('{')
+                end = cleaned_text.rfind('}')
+                if start != -1 and end != -1 and start < end:
+                    json_text = cleaned_text[start:end+1]
+                    result = json.loads(json_text)
                     if isinstance(result, dict) and 'operations' in result:
                         return result
-                except:
-                    continue
-        
+            except:
+                pass
+                
+            raise ValueError("Could not parse response as valid JSON. The response may be truncated or malformed.")
+
         raise ValueError("Could not find valid JSON response. Please try again with a clearer prompt.")
         
     except Exception as e:

@@ -491,6 +491,25 @@ class WorkspaceManager:
         processed = []
         for operation in operations:
             try:
+                # First validate the operation content before cleaning paths
+                if operation['type'] == 'edit_file':
+                    changes = operation.get('changes', [])
+                    for change in changes:
+                        if 'old' in change and 'new' in change:
+                            # Validate that both old and new fields are complete
+                            if not change['old'].strip() or not change['new'].strip():
+                                raise ValueError(f"Incomplete change detected in {operation.get('path', 'unknown file')}")
+                elif operation['type'] == 'create_file':
+                    # Validate content field is complete
+                    if not operation.get('content', '').strip():
+                        raise ValueError(f"Empty or incomplete content for {operation.get('path', 'unknown file')}")
+
+                # After validation, clean the paths for processing
+                if 'path' in operation:
+                    operation['path'] = operation['path'].split('?')[0].split('#')[0]
+                if 'new_path' in operation:
+                    operation['new_path'] = operation['new_path'].split('?')[0].split('#')[0]
+                
                 if operation['type'] == 'edit_file':
                     # Get current content if file exists
                     file_path = os.path.join(workspace_dir, operation['path'])
