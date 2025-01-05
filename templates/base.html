@@ -17,7 +17,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/scroll/simplescrollbars.min.css" rel="stylesheet">
     
     <!-- Custom CSS -->
-    <link href="{{ url_for('static', filename='styles.css') }}?v={{ cache_buster }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='style.css') }}?v={{ cache_buster }}" rel="stylesheet">
 
     <!-- File Processing Libraries -->
     <!-- PDF.js -->
@@ -55,10 +55,10 @@
                             Workspace
                         </h2>
                         <div class="flex gap-2">
-                            <button onclick="createWorkspace()" class="btn btn-primary btn-sm" title="Create New Workspace">
+                            <button onclick="createWorkspace()" class="legacy-btn legacy-btn-primary legacy-btn-sm" title="Create New Workspace">
                                 <i class="fas fa-plus"></i>
                             </button>
-                            <button onclick="importFolder()" class="btn btn-secondary btn-sm" title="Import Folder" id="importFolderBtn">
+                            <button onclick="importFolder()" class="legacy-btn legacy-btn-secondary legacy-btn-sm" title="Import Folder" id="importFolderBtn">
                                 <i class="fas fa-folder-plus"></i>
                             </button>
                         </div>
@@ -124,10 +124,10 @@
                                 class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none text-black"
                                 placeholder="Describe what you want to create or modify..."></textarea>
                             <div class="flex flex-col gap-2">
-                                <label for="codeAttachment" class="btn btn-secondary btn-sm">
+                                <label for="codeAttachment" class="legacy-btn legacy-btn-secondary legacy-btn-sm">
                                     <i class="fas fa-paperclip"></i>
                                 </label>
-                                <button onclick="processPrompt()" class="btn btn-primary btn-sm">
+                                <button onclick="processPrompt()" class="legacy-btn legacy-btn-primary legacy-btn-sm">
                                     <i class="fas fa-magic"></i>
                                 </button>
                                 <input type="file" id="codeAttachment" class="hidden" multiple>
@@ -173,10 +173,10 @@
                             class="flex-1 bg-[#2d2d2d] border border-[#3e3e42] rounded p-2 text-sm resize-none h-[80px] overflow-y-auto text-black"
                             placeholder="Ask a question about your code..."></textarea>
                         <div class="flex flex-col gap-2">
-                            <label for="chatAttachment" class="btn btn-secondary btn-sm">
+                            <label for="chatAttachment" class="legacy-btn legacy-btn-secondary legacy-btn-sm">
                                 <i class="fas fa-paperclip"></i>
                             </label>
-                            <button onclick="sendChatMessage()" class="btn btn-primary btn-sm">
+                            <button onclick="sendChatMessage()" class="legacy-btn legacy-btn-primary legacy-btn-sm">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
                             <input type="file" id="chatAttachment" class="hidden" multiple>
