@@ -444,18 +444,61 @@ def expand_directory():
         data = request.get_json()
         workspace_dir = data.get('workspace_dir')
         dir_path = data.get('dir_path')
+        page = int(data.get('page', 1))
+        page_size = int(data.get('page_size', 100))
+        
+        print(f"\nExpanding directory request:")  # Debug log
+        print(f"Workspace: {workspace_dir}")
+        print(f"Directory: {dir_path}")
+        print(f"Page: {page}, Page Size: {page_size}")
         
         if not workspace_dir or not os.path.exists(workspace_dir):
-            return jsonify({'status': 'error', 'message': 'Invalid workspace directory'})
+            print(f"Invalid workspace directory: {workspace_dir}")  # Debug log
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid workspace directory'
+            }), 400
             
         if not dir_path:
-            return jsonify({'status': 'error', 'message': 'Directory path not provided'})
-            
-        children = workspace_manager.expand_directory(dir_path)
-        return jsonify({'status': 'success', 'children': children})
+            print("No directory path provided")  # Debug log
+            return jsonify({
+                'status': 'error',
+                'message': 'Directory path not provided'
+            }), 400
         
+        try:
+            result = workspace_manager.expand_directory(
+                dir_path=dir_path,
+                workspace_dir=workspace_dir,
+                page_size=page_size,
+                page=page
+            )
+            print(f"Expansion successful: {len(result['items'])} items")  # Debug log
+            return jsonify({
+                'status': 'success',
+                'items': result['items'],
+                'total_items': result['total_items'],
+                'has_more': result['has_more']
+            })
+        except ValueError as e:
+            print(f"Validation error: {str(e)}")  # Debug log
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            }), 400
+        except Exception as e:
+            print(f"Unexpected error: {str(e)}")  # Debug log
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to expand directory: {str(e)}'
+            }), 500
+            
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+        print(f"Request processing error: {str(e)}")  # Debug log
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 @app.route('/process', methods=['POST'])
 def process_prompt():

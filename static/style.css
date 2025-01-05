@@ -476,11 +476,22 @@ textarea:focus {
     margin-left: 1.25rem;
     padding-left: 1rem;
     border-left: 1px solid var(--border-color);
+    transition: all 0.2s ease;
 }
 
 .tree-item.expanded > .children {
-    display: block;
-    animation: slideDown 0.2s ease-out;
+    display: block !important;
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Ensure nested items are visible */
+.tree-item.expanded .tree-item .children {
+    display: none;
+}
+
+.tree-item.expanded .tree-item.expanded > .children {
+    display: block !important;
 }
 
 .tree-item .name {
@@ -791,4 +802,43 @@ textarea:focus {
 /* Selected State */
 .tree-item.selected i {
     filter: brightness(1.2);
+}
+
+/* Recommendation Button */
+.recommendation-btn {
+    opacity: 0;
+    position: absolute;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: var(--primary);
+    color: white;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.recommendation-btn i {
+    font-size: 14px;
+    margin: 0;
+    width: auto;
+    height: auto;
+}
+
+.recommendation-btn:hover {
+    background: var(--primary-hover);
+    transform: scale(1.1);
+}
+
+.tree-item .folder-header,
+.tree-item .file-header {
+    position: relative;
+}
+
+.tree-item .folder-header:hover .recommendation-btn,
+.tree-item .file-header:hover .recommendation-btn {
+    opacity: 1;
 } 

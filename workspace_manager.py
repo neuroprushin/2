@@ -236,9 +236,113 @@ class WorkspaceManager:
         except OSError:
             return []
     
-    def expand_directory(self, dir_path: str) -> List[dict]:
-        """Expand a directory node for lazy loading"""
-        return self.get_directory_structure(dir_path, depth=1)
+    def expand_directory(self, dir_path: str, workspace_dir: str, page_size: int = 100, page: int = 1) -> dict:
+        """Expand a directory node for lazy loading with pagination support
+        
+        Args:
+            dir_path: Directory path to expand
+            workspace_dir: The workspace directory containing the files
+            page_size: Number of items per page
+            page: Page number (1-based)
+            
+        Returns:
+            Dictionary containing:
+            - items: List of files and directories in the current page
+            - total_items: Total number of items
+            - has_more: Whether there are more items
+        """
+        try:
+            # Ensure we have absolute paths
+            if os.path.isabs(dir_path):
+                abs_path = dir_path
+                # Verify the path is within workspace directory
+                if not os.path.abspath(abs_path).startswith(os.path.abspath(workspace_dir)):
+                    raise ValueError("Path is outside workspace directory")
+            else:
+                abs_path = os.path.join(workspace_dir, dir_path)
+            
+            print(f"Expanding directory: {abs_path}")  # Debug log
+            
+            if not os.path.exists(abs_path):
+                print(f"Directory not found: {abs_path}")  # Debug log
+                raise ValueError(f"Directory not found: {dir_path}")
+            
+            if not os.path.isdir(abs_path):
+                print(f"Not a directory: {abs_path}")  # Debug log
+                raise ValueError(f"Not a directory: {dir_path}")
+            
+            # Get all entries first
+            entries = []
+            start_idx = (page - 1) * page_size
+            
+            try:
+                with os.scandir(abs_path) as it:
+                    for entry in it:
+                        try:
+                            # Skip hidden files and ignored directories
+                            if entry.name.startswith('.') or (entry.is_dir() and entry.name in self.SKIP_FOLDERS):
+                                print(f"Skipping {entry.name} (hidden/ignored)")  # Debug log
+                                continue
+                            
+                            # Get path relative to current directory
+                            entry_rel_path = os.path.relpath(entry.path, abs_path)
+                            
+                            # Skip if path matches gitignore patterns
+                            if self._should_ignore(entry_rel_path):
+                                print(f"Skipping {entry_rel_path} (gitignore)")  # Debug log
+                                continue
+                            
+                            if entry.is_file() and not any(entry_rel_path.endswith(ext) for ext in self.SKIP_EXTENSIONS):
+                                print(f"Adding file: {entry_rel_path}")  # Debug log
+                                entries.append({
+                                    'type': 'file',
+                                    'path': entry_rel_path.replace('\\', '/'),
+                                    'size': entry.stat().st_size
+                                })
+                            elif entry.is_dir():
+                                # For directories, check if they have children without loading them all
+                                has_children = False
+                                try:
+                                    with os.scandir(entry.path) as dir_it:
+                                        for child in dir_it:
+                                            if not child.name.startswith('.') and not (child.is_dir() and child.name in self.SKIP_FOLDERS):
+                                                has_children = True
+                                                break
+                                except OSError as e:
+                                    print(f"Error checking directory contents: {e}")  # Debug log
+                                    pass
+                                
+                                print(f"Adding directory: {entry_rel_path} (has_children={has_children})")  # Debug log
+                                entries.append({
+                                    'type': 'directory',
+                                    'path': entry_rel_path.replace('\\', '/'),
+                                    'has_children': has_children
+                                })
+                        except OSError as e:
+                            print(f"Error processing entry {entry.name}: {e}")  # Debug log
+                            continue
+            except OSError as e:
+                print(f"Error scanning directory {abs_path}: {e}")  # Debug log
+                raise
+            
+            # Sort entries (directories first, then alphabetically)
+            entries.sort(key=lambda x: (x['type'] != 'directory', x['path'].lower()))
+            
+            # Get total count and slice for current page
+            total_items = len(entries)
+            page_entries = entries[start_idx:start_idx + page_size]
+            
+            print(f"Directory expansion results: {len(page_entries)} items (total: {total_items})")  # Debug log
+            
+            return {
+                'items': page_entries,
+                'total_items': total_items,
+                'has_more': (start_idx + page_size) < total_items
+            }
+            
+        except Exception as e:
+            print(f"Error in expand_directory: {str(e)}")  # Debug log
+            raise
     
     def clear_cache(self, file_path: Optional[str] = None):
         """Clear cache entries"""
