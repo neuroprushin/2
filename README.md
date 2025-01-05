@@ -110,7 +110,6 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 
 ## Special Thanks
 
-Special thanks to:
 - **Nikole Cardoso** for her invaluable contributions and support
 - **Guilherme Guirro** for his expertise and guidance
 - **Felipe Santos** for his dedication and insights
