@@ -460,13 +460,13 @@ function updateWorkspaceTree(structure) {
     }
 }
 
-function buildTree(structure, container) {
+function buildTree(structure, container, parentPath = '') {
     structure.forEach(item => {
         const itemDiv = document.createElement('div');
         itemDiv.className = `tree-item ${item.type === 'directory' ? 'folder' : 'file'}`;
         
-        // Get the relative path by removing any leading slashes
-        const relativePath = item.path.replace(/^[\/\\]+/, '');
+        // Construct the full path by combining parent path with current item
+        const relativePath = parentPath ? `${parentPath}/${item.path}` : item.path;
         
         if (item.type === 'directory') {
             const folderHeader = document.createElement('div');
@@ -478,7 +478,7 @@ function buildTree(structure, container) {
             
             const name = document.createElement('span');
             name.className = 'name text-gray-300';
-            name.textContent = relativePath.split('/').pop();
+            name.textContent = item.path.split('/').pop();
             folderHeader.appendChild(name);
             
             itemDiv.appendChild(folderHeader);
@@ -487,12 +487,20 @@ function buildTree(structure, container) {
             children.className = 'children ml-4 mt-1';
             itemDiv.appendChild(children);
             
-            // Lazy loading of directory contents
-            folderHeader.onclick = async () => {
+            // Load children immediately if they exist in the structure
+            if (item.children && item.children.length > 0) {
+                buildTree(item.children, children, relativePath);
+            }
+            
+            // Handle folder click for expanding/collapsing
+            folderHeader.onclick = async (e) => {
+                e.stopPropagation(); // Prevent event bubbling
+                
                 if (!itemDiv.classList.contains('expanded')) {
-                    // Only load children if not already loaded
+                    // Load children if they haven't been loaded yet
                     if (!children.hasChildNodes() && item.has_children) {
                         try {
+                            console.log('Expanding directory:', relativePath); // Debug log
                             const response = await fetch('/workspace/expand', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
@@ -503,35 +511,40 @@ function buildTree(structure, container) {
                             });
                             
                             const data = await response.json();
-                            if (data.status === 'success') {
-                                buildTree(data.children, children);
+                            console.log('Expansion response:', data); // Debug log
+                            if (data.status === 'success' && data.children) {
+                                children.innerHTML = ''; // Clear any existing content
+                                buildTree(data.children, children, relativePath);
                             }
                         } catch (error) {
                             console.error('Error expanding directory:', error);
                         }
                     }
                 }
+                
                 itemDiv.classList.toggle('expanded');
-                icon.className = itemDiv.classList.contains('expanded') ? 'fas fa-folder-open text-yellow-400' : 'fas fa-folder text-yellow-400';
+                icon.className = itemDiv.classList.contains('expanded') ? 
+                    'fas fa-folder-open text-yellow-400' : 
+                    'fas fa-folder text-yellow-400';
             };
         } else {
             const fileHeader = document.createElement('div');
             fileHeader.className = 'file-header flex items-center gap-2 p-1 hover:bg-gray-700 rounded cursor-pointer';
             
             const icon = document.createElement('i');
-            const iconClass = getFileIcon(relativePath);
+            const iconClass = getFileIcon(item.path);
             icon.className = `fas ${iconClass}`;
             fileHeader.appendChild(icon);
             
             const name = document.createElement('span');
             name.className = 'name text-gray-300';
-            name.textContent = relativePath.split('/').pop();
+            name.textContent = item.path.split('/').pop();
             fileHeader.appendChild(name);
             
             // Show file size for large files
             if (item.size > 1024 * 1024) { // 1MB
                 const size = document.createElement('span');
-                size.className = 'text-xs text-gray-400';
+                size.className = 'text-xs text-gray-400 ml-2';
                 size.textContent = `${(item.size / (1024 * 1024)).toFixed(1)}MB`;
                 fileHeader.appendChild(size);
             }
@@ -539,7 +552,11 @@ function buildTree(structure, container) {
             itemDiv.appendChild(fileHeader);
             
             // Add click handler to view file content
-            fileHeader.onclick = () => showFileContent(relativePath);
+            fileHeader.onclick = (e) => {
+                e.stopPropagation(); // Prevent event bubbling
+                console.log('Opening file:', relativePath); // Debug log
+                showFileContent(relativePath);
+            };
         }
         
         container.appendChild(itemDiv);
@@ -552,53 +569,53 @@ function getFileIcon(path) {
     
     // First check for specific filenames
     const filenameIcons = {
-        'dockerfile': 'fa-docker text-blue-400',
-        'docker-compose.yml': 'fa-docker text-blue-400',
-        'docker-compose.yaml': 'fa-docker text-blue-400',
-        '.dockerignore': 'fa-docker text-gray-400',
-        '.gitignore': 'fa-git text-gray-400',
-        '.gitattributes': 'fa-git text-gray-400',
-        '.gitmodules': 'fa-git text-gray-400',
-        '.env': 'fa-lock text-yellow-400',
-        '.env.example': 'fa-lock text-gray-400',
-        '.env.local': 'fa-lock text-yellow-400',
-        '.env.development': 'fa-lock text-green-400',
-        '.env.production': 'fa-lock text-red-400',
-        'package.json': 'fa-npm text-red-400',
-        'package-lock.json': 'fa-npm text-red-400',
-        'composer.json': 'fa-php text-purple-400',
-        'composer.lock': 'fa-php text-purple-400',
-        'requirements.txt': 'fa-python text-blue-400',
-        'pipfile': 'fa-python text-blue-400',
-        'pipfile.lock': 'fa-python text-blue-400',
-        'poetry.lock': 'fa-python text-blue-400',
-        'pyproject.toml': 'fa-python text-blue-400',
-        'cargo.toml': 'fa-cube text-brown-400',
-        'cargo.lock': 'fa-cube text-brown-400',
-        'makefile': 'fa-cogs text-gray-400',
-        'readme.md': 'fa-book text-blue-400',
-        'changelog.md': 'fa-clipboard-list text-blue-400',
-        'license': 'fa-certificate text-yellow-400',
-        'license.md': 'fa-certificate text-yellow-400',
-        'license.txt': 'fa-certificate text-yellow-400',
-        'contributing.md': 'fa-hands-helping text-blue-400',
-        'authors.md': 'fa-users text-blue-400',
-        'security.md': 'fa-shield-alt text-red-400',
-        'robots.txt': 'fa-robot text-gray-400',
-        'manifest.json': 'fa-puzzle-piece text-purple-400',
-        'browserslist': 'fa-browsers text-orange-400',
-        '.eslintrc': 'fa-lint text-purple-400',
-        '.prettierrc': 'fa-paint-brush text-pink-400',
-        '.babelrc': 'fa-babel text-yellow-400',
-        'tsconfig.json': 'fa-typescript text-blue-400',
-        'jest.config.js': 'fa-jest text-red-400',
-        'webpack.config.js': 'fa-webpack text-blue-400',
-        'vite.config.js': 'fa-vite text-yellow-400',
-        'next.config.js': 'fa-next text-black',
-        'nuxt.config.js': 'fa-nuxt text-green-400',
-        'angular.json': 'fa-angular text-red-400',
-        'vue.config.js': 'fa-vuejs text-green-400',
-        'svelte.config.js': 'fa-svelte text-orange-400'
+        // Docker
+        'dockerfile': 'fa-brands fa-docker',
+        'docker-compose.yml': 'fa-brands fa-docker',
+        'docker-compose.yaml': 'fa-brands fa-docker',
+        '.dockerignore': 'fa-brands fa-docker',
+        
+        // Git
+        '.gitignore': 'fa-brands fa-git-alt',
+        '.gitattributes': 'fa-brands fa-git-alt',
+        '.gitmodules': 'fa-brands fa-git-alt',
+        
+        // Environment & Config
+        '.env': 'fa-solid fa-lock',
+        '.env.example': 'fa-solid fa-lock',
+        '.env.local': 'fa-solid fa-lock',
+        '.env.development': 'fa-solid fa-lock',
+        '.env.production': 'fa-solid fa-lock',
+        'config.json': 'fa-solid fa-cog',
+        'config.js': 'fa-solid fa-cog',
+        'config.yml': 'fa-solid fa-cog',
+        'config.yaml': 'fa-solid fa-cog',
+        
+        // Package Management
+        'package.json': 'fa-brands fa-npm',
+        'package-lock.json': 'fa-brands fa-npm',
+        'composer.json': 'fa-brands fa-php',
+        'composer.lock': 'fa-brands fa-php',
+        'requirements.txt': 'fa-brands fa-python',
+        'pipfile': 'fa-brands fa-python',
+        'pipfile.lock': 'fa-brands fa-python',
+        'cargo.toml': 'fa-solid fa-cube',
+        'cargo.lock': 'fa-solid fa-cube',
+        
+        // Documentation
+        'readme.md': 'fa-solid fa-book',
+        'changelog.md': 'fa-solid fa-list',
+        'license': 'fa-solid fa-certificate',
+        'license.md': 'fa-solid fa-certificate',
+        'license.txt': 'fa-solid fa-certificate',
+        
+        // Build & Config
+        'makefile': 'fa-solid fa-cogs',
+        '.travis.yml': 'fa-solid fa-cog',
+        '.gitlab-ci.yml': 'fa-brands fa-gitlab',
+        'jenkins': 'fa-solid fa-cog',
+        'webpack.config.js': 'fa-solid fa-cog',
+        'tsconfig.json': 'fa-solid fa-cog'
     };
 
     if (filenameIcons[filename]) {
@@ -608,241 +625,88 @@ function getFileIcon(path) {
     // Then check file extensions
     const extensionIcons = {
         // Web Development
-        'html': 'fa-html5 text-orange-400',
-        'htm': 'fa-html5 text-orange-400',
-        'xhtml': 'fa-html5 text-orange-400',
-        'css': 'fa-css3 text-blue-400',
-        'scss': 'fa-sass text-pink-400',
-        'sass': 'fa-sass text-pink-400',
-        'less': 'fa-less text-blue-400',
-        'styl': 'fa-stylus text-green-400',
-        'js': 'fa-js text-yellow-400',
-        'jsx': 'fa-react text-blue-400',
-        'cjs': 'fa-node text-green-400',
-        'mjs': 'fa-node text-green-400',
-        'ts': 'fa-typescript text-blue-400',
-        'tsx': 'fa-react text-blue-400',
-        'vue': 'fa-vuejs text-green-400',
-        'svelte': 'fa-svelte text-orange-400',
-        'php': 'fa-php text-purple-400',
-        'phtml': 'fa-php text-purple-400',
-        'rb': 'fa-gem text-red-400',
-        'erb': 'fa-gem text-red-400',
-        'py': 'fa-python text-blue-400',
-        'pyc': 'fa-python text-gray-400',
-        'pyo': 'fa-python text-gray-400',
-        'pyd': 'fa-python text-gray-400',
-        'java': 'fa-java text-red-400',
-        'class': 'fa-java text-red-400',
-        'jar': 'fa-java text-red-400',
-        'war': 'fa-java text-red-400',
-        'jsp': 'fa-java text-red-400',
-        'go': 'fa-golang text-blue-400',
-        'rs': 'fa-rust text-brown-400',
-        'rlib': 'fa-rust text-brown-400',
-        'swift': 'fa-swift text-orange-400',
-        'kt': 'fa-kotlin text-purple-400',
-        'kts': 'fa-kotlin text-purple-400',
-        'dart': 'fa-dart text-blue-400',
-        'coffee': 'fa-coffee text-brown-400',
-        'elm': 'fa-elm text-blue-400',
-        'erl': 'fa-erlang text-red-400',
-        'ex': 'fa-elixir text-purple-400',
-        'exs': 'fa-elixir text-purple-400',
-        'fs': 'fa-microsoft text-purple-400',
-        'fsx': 'fa-microsoft text-purple-400',
-        'fsi': 'fa-microsoft text-purple-400',
-        'rs': 'fa-rust text-brown-400',
-        'rlib': 'fa-rust text-brown-400',
-
-        // Data & Config
-        'json': 'fa-code text-yellow-400',
-        'yaml': 'fa-file-code text-red-400',
-        'yml': 'fa-file-code text-red-400',
-        'xml': 'fa-file-code text-orange-400',
-        'toml': 'fa-file-code text-gray-400',
-        'ini': 'fa-cog text-gray-400',
-        'conf': 'fa-cog text-gray-400',
-        'config': 'fa-cog text-gray-400',
-        'sql': 'fa-database text-blue-400',
-        'sqlite': 'fa-database text-blue-400',
-        'db': 'fa-database text-blue-400',
-        'mdb': 'fa-database text-blue-400',
-        'pdb': 'fa-database text-blue-400',
-        'graphql': 'fa-project-diagram text-pink-400',
-        'gql': 'fa-project-diagram text-pink-400',
-        'prisma': 'fa-database text-blue-400',
-        'csv': 'fa-file-csv text-green-400',
-        'tsv': 'fa-file-alt text-green-400',
-        'properties': 'fa-cog text-gray-400',
-
-        // Shell Scripts
-        'sh': 'fa-terminal text-green-400',
-        'bash': 'fa-terminal text-green-400',
-        'zsh': 'fa-terminal text-green-400',
-        'fish': 'fa-terminal text-green-400',
-        'ps1': 'fa-terminal text-blue-400',
-        'psm1': 'fa-terminal text-blue-400',
-        'psd1': 'fa-terminal text-blue-400',
-        'bat': 'fa-terminal text-blue-400',
-        'cmd': 'fa-terminal text-blue-400',
-        'reg': 'fa-windows text-blue-400',
-
+        'html': 'fa-brands fa-html5',
+        'htm': 'fa-brands fa-html5',
+        'css': 'fa-brands fa-css3-alt',
+        'scss': 'fa-brands fa-sass',
+        'sass': 'fa-brands fa-sass',
+        'less': 'fa-brands fa-less',
+        'js': 'fa-brands fa-js',
+        'jsx': 'fa-brands fa-react',
+        'ts': 'fa-solid fa-code',
+        'tsx': 'fa-brands fa-react',
+        'vue': 'fa-brands fa-vuejs',
+        'php': 'fa-brands fa-php',
+        'py': 'fa-brands fa-python',
+        'rb': 'fa-solid fa-gem',
+        'java': 'fa-brands fa-java',
+        'go': 'fa-solid fa-code',
+        'rs': 'fa-solid fa-code',
+        'swift': 'fa-solid fa-code',
+        'kt': 'fa-solid fa-code',
+        
         // Documents
-        'md': 'fa-markdown text-white',
-        'mdx': 'fa-markdown text-blue-400',
-        'txt': 'fa-file-alt text-gray-400',
-        'rtf': 'fa-file-alt text-blue-400',
-        'pdf': 'fa-file-pdf text-red-400',
-        'doc': 'fa-file-word text-blue-400',
-        'docx': 'fa-file-word text-blue-400',
-        'docm': 'fa-file-word text-blue-400',
-        'xls': 'fa-file-excel text-green-400',
-        'xlsx': 'fa-file-excel text-green-400',
-        'xlsm': 'fa-file-excel text-green-400',
-        'ppt': 'fa-file-powerpoint text-orange-400',
-        'pptx': 'fa-file-powerpoint text-orange-400',
-        'pptm': 'fa-file-powerpoint text-orange-400',
-        'odt': 'fa-file-alt text-blue-400',
-        'ods': 'fa-file-alt text-green-400',
-        'odp': 'fa-file-alt text-orange-400',
-        'pages': 'fa-apple text-blue-400',
-        'numbers': 'fa-apple text-green-400',
-        'keynote': 'fa-apple text-orange-400',
-        'tex': 'fa-tex text-green-400',
-        'latex': 'fa-tex text-green-400',
-        'rst': 'fa-file-alt text-blue-400',
-        'adoc': 'fa-file-alt text-blue-400',
-        'epub': 'fa-book text-blue-400',
-        'mobi': 'fa-book text-orange-400',
-
+        'md': 'fa-solid fa-file-lines',
+        'txt': 'fa-solid fa-file-lines',
+        'pdf': 'fa-solid fa-file-pdf',
+        'doc': 'fa-solid fa-file-word',
+        'docx': 'fa-solid fa-file-word',
+        'xls': 'fa-solid fa-file-excel',
+        'xlsx': 'fa-solid fa-file-excel',
+        'ppt': 'fa-solid fa-file-powerpoint',
+        'pptx': 'fa-solid fa-file-powerpoint',
+        
         // Images
-        'jpg': 'fa-file-image text-pink-400',
-        'jpeg': 'fa-file-image text-pink-400',
-        'png': 'fa-file-image text-green-400',
-        'gif': 'fa-file-image text-purple-400',
-        'bmp': 'fa-file-image text-gray-400',
-        'svg': 'fa-file-image text-orange-400',
-        'svgz': 'fa-file-image text-orange-400',
-        'ico': 'fa-file-image text-blue-400',
-        'webp': 'fa-file-image text-blue-400',
-        'tif': 'fa-file-image text-purple-400',
-        'tiff': 'fa-file-image text-purple-400',
-        'psd': 'fa-adobe text-blue-400',
-        'psb': 'fa-adobe text-blue-400',
-        'ai': 'fa-adobe text-orange-400',
-        'eps': 'fa-adobe text-orange-400',
-        'raw': 'fa-camera text-gray-400',
-        'cr2': 'fa-camera text-gray-400',
-        'nef': 'fa-camera text-gray-400',
-        'sketch': 'fa-pencil-ruler text-yellow-400',
-        'fig': 'fa-pencil-ruler text-purple-400',
-        'xcf': 'fa-paint-brush text-orange-400',
-        'heic': 'fa-file-image text-blue-400',
-        'heif': 'fa-file-image text-blue-400',
-
+        'jpg': 'fa-solid fa-file-image',
+        'jpeg': 'fa-solid fa-file-image',
+        'png': 'fa-solid fa-file-image',
+        'gif': 'fa-solid fa-file-image',
+        'svg': 'fa-solid fa-file-image',
+        'webp': 'fa-solid fa-file-image',
+        
         // Audio & Video
-        'mp3': 'fa-file-audio text-purple-400',
-        'wav': 'fa-file-audio text-blue-400',
-        'ogg': 'fa-file-audio text-blue-400',
-        'flac': 'fa-file-audio text-green-400',
-        'aac': 'fa-file-audio text-red-400',
-        'm4a': 'fa-file-audio text-red-400',
-        'wma': 'fa-file-audio text-blue-400',
-        'aiff': 'fa-file-audio text-gray-400',
-        'mp4': 'fa-file-video text-red-400',
-        'avi': 'fa-file-video text-blue-400',
-        'mov': 'fa-file-video text-blue-400',
-        'wmv': 'fa-file-video text-blue-400',
-        'flv': 'fa-file-video text-red-400',
-        'webm': 'fa-file-video text-green-400',
-        'mkv': 'fa-file-video text-purple-400',
-        'm4v': 'fa-file-video text-red-400',
-        'mpg': 'fa-file-video text-blue-400',
-        'mpeg': 'fa-file-video text-blue-400',
-        '3gp': 'fa-file-video text-gray-400',
-
+        'mp3': 'fa-solid fa-file-audio',
+        'wav': 'fa-solid fa-file-audio',
+        'ogg': 'fa-solid fa-file-audio',
+        'mp4': 'fa-solid fa-file-video',
+        'avi': 'fa-solid fa-file-video',
+        'mov': 'fa-solid fa-file-video',
+        'webm': 'fa-solid fa-file-video',
+        
         // Archives
-        'zip': 'fa-file-archive text-yellow-400',
-        'rar': 'fa-file-archive text-purple-400',
-        '7z': 'fa-file-archive text-gray-400',
-        'tar': 'fa-file-archive text-brown-400',
-        'gz': 'fa-file-archive text-red-400',
-        'bz2': 'fa-file-archive text-red-400',
-        'xz': 'fa-file-archive text-blue-400',
-        'iso': 'fa-compact-disc text-gray-400',
-        'dmg': 'fa-apple text-gray-400',
-        'pkg': 'fa-box text-blue-400',
-        'deb': 'fa-ubuntu text-orange-400',
-        'rpm': 'fa-fedora text-blue-400',
-
-        // Development
-        'c': 'fa-file-code text-blue-400',
-        'h': 'fa-file-code text-blue-400',
-        'cpp': 'fa-file-code text-blue-400',
-        'hpp': 'fa-file-code text-blue-400',
-        'cc': 'fa-file-code text-blue-400',
-        'hh': 'fa-file-code text-blue-400',
-        'cs': 'fa-microsoft text-purple-400',
-        'csx': 'fa-microsoft text-purple-400',
-        'vb': 'fa-microsoft text-blue-400',
-        'fs': 'fa-microsoft text-purple-400',
-        'm': 'fa-apple text-gray-400',
-        'mm': 'fa-apple text-gray-400',
-        'swift': 'fa-apple text-orange-400',
-        'r': 'fa-chart-line text-blue-400',
-        'rmd': 'fa-chart-line text-blue-400',
-        'matlab': 'fa-chart-line text-orange-400',
-        'pl': 'fa-code text-blue-400',
-        'pm': 'fa-code text-blue-400',
-        'lua': 'fa-moon text-blue-400',
-        'clj': 'fa-code text-green-400',
-        'scala': 'fa-code text-red-400',
-        'erl': 'fa-code text-red-400',
-        'ex': 'fa-code text-purple-400',
-        'exs': 'fa-code text-purple-400',
-        'hx': 'fa-code text-orange-400',
-        'hs': 'fa-code text-purple-400',
-        'idr': 'fa-code text-red-400',
-        'ml': 'fa-code text-orange-400',
-        'mli': 'fa-code text-orange-400',
-        'rkt': 'fa-code text-red-400',
-        'elm': 'fa-leaf text-blue-400',
-
+        'zip': 'fa-solid fa-file-archive',
+        'rar': 'fa-solid fa-file-archive',
+        '7z': 'fa-solid fa-file-archive',
+        'tar': 'fa-solid fa-file-archive',
+        'gz': 'fa-solid fa-file-archive',
+        
+        // Data & Config
+        'json': 'fa-solid fa-code',
+        'yaml': 'fa-solid fa-code',
+        'yml': 'fa-solid fa-code',
+        'xml': 'fa-solid fa-code',
+        'sql': 'fa-solid fa-database',
+        'db': 'fa-solid fa-database',
+        'sqlite': 'fa-solid fa-database',
+        
+        // Shell Scripts
+        'sh': 'fa-solid fa-terminal',
+        'bash': 'fa-solid fa-terminal',
+        'zsh': 'fa-solid fa-terminal',
+        'fish': 'fa-solid fa-terminal',
+        'ps1': 'fa-solid fa-terminal',
+        'bat': 'fa-solid fa-terminal',
+        'cmd': 'fa-solid fa-terminal',
+        
         // Other
-        'log': 'fa-file-alt text-gray-400',
-        'lock': 'fa-lock text-yellow-400',
-        'key': 'fa-key text-yellow-400',
-        'pem': 'fa-key text-green-400',
-        'crt': 'fa-certificate text-green-400',
-        'cer': 'fa-certificate text-green-400',
-        'p12': 'fa-certificate text-purple-400',
-        'pfx': 'fa-certificate text-purple-400',
-        'pub': 'fa-key text-yellow-400',
-        'gpg': 'fa-key text-red-400',
-        'asc': 'fa-key text-gray-400',
-        'enc': 'fa-lock text-red-400',
-        'sig': 'fa-signature text-blue-400',
-        'sum': 'fa-check-double text-green-400',
-        'md5': 'fa-check-double text-blue-400',
-        'sha1': 'fa-check-double text-blue-400',
-        'sha256': 'fa-check-double text-blue-400',
-        'tmp': 'fa-clock text-gray-400',
-        'temp': 'fa-clock text-gray-400',
-        'cache': 'fa-database text-gray-400',
-        'bak': 'fa-history text-gray-400',
-        'old': 'fa-history text-gray-400',
-        'orig': 'fa-history text-gray-400',
-        'swp': 'fa-history text-gray-400',
-        'dist': 'fa-box text-blue-400',
-        'min': 'fa-compress-arrows-alt text-blue-400',
-        'map': 'fa-map text-green-400',
-        'flow': 'fa-project-diagram text-blue-400',
-        'test': 'fa-vial text-green-400',
-        'spec': 'fa-vial text-green-400'
+        'log': 'fa-solid fa-file-lines',
+        'key': 'fa-solid fa-key',
+        'pem': 'fa-solid fa-key',
+        'crt': 'fa-solid fa-certificate',
+        'cer': 'fa-solid fa-certificate'
     };
 
-    return extensionIcons[ext] || 'fa-file-code text-gray-400';
+    return extensionIcons[ext] || 'fa-solid fa-file-code';
 }
 
 // Code Generation
