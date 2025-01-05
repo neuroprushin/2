@@ -1,19 +1,23 @@
+import os
+import json
+import shutil
+import tempfile
+import re
+from datetime import datetime
+from pathlib import Path
+import difflib
+
 import eventlet
 eventlet.monkey_patch()
 
+# These imports must be after eventlet.monkey_patch() for proper async operation
+# noqa: E402 pylama: ignore=E402
 from flask import Flask, render_template, request, jsonify, send_from_directory
-import os
-import tempfile
+from flask_socketio import SocketIO, emit
 from dotenv import load_dotenv
 from openai import OpenAI
 from anthropic import Anthropic
-import json
-import shutil
-from pathlib import Path
-from datetime import datetime
-import difflib
-import re
-from flask_socketio import SocketIO, emit
+from workspace_manager import WorkspaceManager
 
 # Model configurations
 AVAILABLE_MODELS = {
@@ -67,6 +71,12 @@ IMPORTANT: Before suggesting any changes:
 3. Only specify the exact changes needed
 4. Do not include unchanged content
 
+When you see files marked with [ATTACHMENT], these are additional files provided by the user for context. Use them to:
+1. Understand code patterns and styles to maintain consistency
+2. Reference implementations or examples
+3. Extract relevant code snippets or configurations
+4. Follow similar patterns when generating new code
+
 Your responses must be formatted as a valid JSON object with this structure:
 {
     "explanation": "Brief explanation of what you will do",
@@ -92,24 +102,30 @@ Operation types can include but are not limited to:
 - rename_file: Rename/move a file (requires new_path)
 - remove_directory: Delete a directory (requires recursive boolean)
 
-Guidelines for edit operations:
+Guidelines for operations:
 1. First read and analyze the existing file
-2. For modifying content:
+2. When a file needs multiple operations (e.g., content changes AND rename):
+   - First use edit_file to modify the content
+   - Then use rename_file to move/rename the file
+   - Each operation should be a separate entry in the operations array
+3. For modifying content:
    - Only specify the exact text to change
    - Use the "changes" array to list each modification
-   - Keep the original style and indentation
-3. For removing content:
-   - Specify the exact text to remove
-   - Keep everything else exactly the same
-4. For adding content:
-   - Specify where to add the new content
-   - Match the file's existing style
+   - For simple text replacements (e.g., replacing all instances of "nginx" with "apache"),
+     include just one change with the exact text to replace
+   - For complex code changes, include each specific change separately
+4. For renaming files:
+   - Use the rename_file operation type
+   - Specify both path (current) and new_path (target)
+   - If content also needs to change, do that in a separate edit_file operation first
 
 IMPORTANT:
 - ALWAYS read the file content first
 - ONLY specify the changes needed
 - NEVER return unchanged content
 - ALWAYS preserve the file's existing style and formatting
+- When both renaming and editing a file, do BOTH operations in the correct order
+- When attachments are provided, use them as reference for code style and patterns
 
 Respond with a single, valid JSON object."""
 
@@ -134,6 +150,9 @@ load_dotenv()
 WORKSPACE_ROOT = os.path.join(os.getcwd(), 'workspaces')
 os.makedirs(WORKSPACE_ROOT, exist_ok=True)
 
+# Initialize workspace manager
+workspace_manager = WorkspaceManager(WORKSPACE_ROOT)
+
 def create_workspace():
     """Create a new workspace directory"""
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -153,11 +172,19 @@ def get_workspace_history():
             # Get directory creation time
             created_at = datetime.fromtimestamp(os.path.getctime(workspace_path))
             
-            # Count files in workspace
-            file_count = 0
-            for root, _, files in os.walk(workspace_path):
-                # Exclude hidden files
-                file_count += sum(1 for f in files if not f.startswith('.'))
+            # Count files in workspace using workspace_manager's logic
+            total_files = 0
+            for root, dirs, files in os.walk(workspace_path):
+                # Skip .git and other ignored directories
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in workspace_manager.SKIP_FOLDERS]
+                
+                # Filter files based on gitignore and skip patterns
+                for file in files:
+                    if (not file.startswith('.') and 
+                        not file.endswith(tuple(workspace_manager.SKIP_EXTENSIONS))):
+                        rel_path = os.path.relpath(os.path.join(root, file), workspace_path)
+                        if not workspace_manager._should_ignore(rel_path):
+                            total_files += 1
             
             # Check if this is an imported workspace
             is_imported = os.path.exists(os.path.join(workspace_path, '.imported'))
@@ -166,7 +193,7 @@ def get_workspace_history():
                 'id': item,
                 'path': workspace_path,
                 'created_at': created_at.isoformat(),
-                'file_count': file_count,
+                'file_count': total_files,
                 'is_imported': is_imported
             })
     
@@ -397,24 +424,38 @@ def get_history():
         }), 500
 
 @app.route('/workspace/structure', methods=['POST'])
-def get_structure():
+def get_workspace_structure():
     try:
-        data = request.json
+        data = request.get_json()
         workspace_dir = data.get('workspace_dir')
         
         if not workspace_dir or not os.path.exists(workspace_dir):
-            return jsonify({'error': 'Invalid workspace directory'}), 400
-            
-        structure = get_workspace_structure(workspace_dir)
-        return jsonify({
-            'status': 'success',
-            'structure': structure
-        })
+            return jsonify({'status': 'error', 'message': 'Invalid workspace directory'})
+        
+        structure = workspace_manager.get_workspace_structure(workspace_dir)
+        return jsonify({'status': 'success', 'structure': structure})
+        
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/workspace/expand', methods=['POST'])
+def expand_directory():
+    try:
+        data = request.get_json()
+        workspace_dir = data.get('workspace_dir')
+        dir_path = data.get('dir_path')
+        
+        if not workspace_dir or not os.path.exists(workspace_dir):
+            return jsonify({'status': 'error', 'message': 'Invalid workspace directory'})
+            
+        if not dir_path:
+            return jsonify({'status': 'error', 'message': 'Directory path not provided'})
+            
+        children = workspace_manager.expand_directory(dir_path)
+        return jsonify({'status': 'success', 'children': children})
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
 
 @app.route('/process', methods=['POST'])
 def process_prompt():
@@ -425,11 +466,6 @@ def process_prompt():
         model_id = data.get('model_id', 'deepseek')
         attachments = data.get('attachments', [])
         
-        print(f"\nReceived request with {len(attachments)} attachments:")
-        for attachment in attachments:
-            print(f"- Attachment: {attachment['name']}")
-            print(f"  Content length: {len(attachment['content'])} characters")
-        
         if not prompt:
             return jsonify({'status': 'error', 'message': 'No prompt provided'}), 400
             
@@ -439,144 +475,53 @@ def process_prompt():
         elif not os.path.exists(workspace_dir):
             return jsonify({'status': 'error', 'message': 'Invalid workspace directory'}), 400
         
-        # First get all existing files content
+        # Use workspace manager to get relevant files based on the query
         socketio.emit('status', {'message': 'Reading workspace files...', 'step': 1})
-        print(f"Reading files from workspace: {workspace_dir}")
-        files_content = get_existing_files(workspace_dir)
-        print(f"Found {len(files_content)} readable files")
+        files_content = workspace_manager.get_workspace_files(workspace_dir, query=prompt)
         
-        # Add attachment contents to the context
-        attachment_context = ""
+        # Add attachment contents to files_content
         if attachments:
-            print("\nProcessing attachments for context:")
-            attachment_context = "\nAttached files for context:\n\n"
             for attachment in attachments:
-                print(f"- Adding {attachment['name']} to context")
-                attachment_context += f"File: {attachment['name']}\nContent:\n{attachment['content']}\n\n"
+                files_content[f"[ATTACHMENT] {attachment['name']}"] = attachment['content']
         
-        # Combine prompt with attachments
-        full_prompt = f"{prompt}\n\n{attachment_context}" if attachments else prompt
-        print("\nFinal prompt with attachments:")
-        print("---")
-        print(full_prompt)
-        print("---")
+        # Get suggestions from AI
+        suggestions = get_code_suggestion(prompt, files_content, model_id=model_id)
         
-        print("Getting workspace context...")
-        workspace_context = get_workspace_context(workspace_dir)
-        
-        print(f"Getting suggestions from AI model: {model_id}")
-        # Get suggestions from AI, passing the file contents
-        suggestions = get_code_suggestion(full_prompt, files_content, workspace_context, model_id)
-        
-        print("AI Response:", json.dumps(suggestions, indent=2))
-        
-        # Validate suggestions format
-        if not isinstance(suggestions, dict):
+        if not suggestions or 'operations' not in suggestions:
             return jsonify({
                 'status': 'error',
-                'message': 'Invalid response format from AI model'
-            }), 500
-        
-        # Don't apply changes yet, just return the suggestions for approval
-        if not suggestions.get('operations'):
-            return jsonify({
-                'status': 'error',
-                'message': 'No changes suggested by the AI'
+                'message': 'No valid suggestions received'
             }), 400
         
-        socketio.emit('status', {'message': 'Preparing changes...', 'step': 4})
-        print("Getting workspace structure...")
-        structure = get_workspace_structure(workspace_dir)
+        # Process operations to add diffs
+        suggestions['operations'] = workspace_manager.process_operations(suggestions['operations'], workspace_dir)
         
-        # Process each operation and generate diffs
-        print("Running linters and generating diffs...")
-        for operation in suggestions.get('operations', []):
-            # Run linter on temporary file for new files
-            if operation.get('type') == 'create_file':
-                tmp = tempfile.NamedTemporaryFile(suffix=os.path.splitext(operation['path'])[1], mode='w', delete=False)
-                try:
-                    tmp.write(operation['content'])
-                    tmp.close()
-                    operation['linter_status'] = run_linter(tmp.name)
-                finally:
-                    os.unlink(tmp.name)
+        # Apply changes if no approval needed
+        if not suggestions.get('requires_approval', True):
+            results = apply_changes(suggestions, workspace_dir)
+            structure = workspace_manager.get_workspace_structure(workspace_dir)
             
-            # Run linter on modified content for edited files
-            elif operation.get('type') == 'edit_file':
-                file_path = operation.get('path')
-                if file_path in files_content:
-                    current_content = files_content[file_path]
-                    
-                    # If we have a changes array, apply each change
-                    if 'changes' in operation:
-                        new_content = current_content
-                        for change in operation['changes']:
-                            old_text = change.get('old', '')
-                            new_text = change.get('new', '')
-                            if old_text in new_content:  # Only replace if old text exists
-                                new_content = new_content.replace(old_text, new_text)
-                        operation['content'] = new_content
-                        
-                        # Run linter on the entire new content first
-                        tmp = tempfile.NamedTemporaryFile(suffix=os.path.splitext(file_path)[1], mode='w', delete=False)
-                        try:
-                            tmp.write(new_content)
-                            tmp.close()
-                            operation['linter_status'] = run_linter(tmp.name)
-                        finally:
-                            os.unlink(tmp.name)
-                        
-                        # Only generate diff if linting passed
-                        if operation['linter_status']:
-                            # Generate diff directly from strings
-                            current_lines = current_content.splitlines()
-                            new_lines = new_content.splitlines()
-                            
-                            diff_lines = list(difflib.unified_diff(
-                                current_lines,
-                                new_lines,
-                                fromfile=f'a/{file_path}',
-                                tofile=f'b/{file_path}',
-                                lineterm=''
-                            ))
-                            
-                            if diff_lines:  # Only include diff if there are actual changes
-                                operation['diff'] = '\n'.join(diff_lines)
-                            else:
-                                # If no changes were made, mark this operation for removal
-                                operation['no_changes'] = True
-                        else:
-                            # If linting failed, mark this operation for removal
-                            operation['no_changes'] = True
-        
-        # Remove operations that didn't result in any changes
-        suggestions['operations'] = [op for op in suggestions['operations'] 
-                                  if not op.get('no_changes', False)]
-        
-        if not suggestions['operations']:
             return jsonify({
-                'status': 'error',
-                'message': 'No valid changes to apply'
-            }), 400
+                'status': 'success',
+                'workspace_dir': workspace_dir,
+                'structure': structure,
+                'results': results
+            })
         
-        socketio.emit('status', {'message': 'Ready for review', 'step': 5})
+        # Return suggestions for approval
+        structure = workspace_manager.get_workspace_structure(workspace_dir)
         return jsonify({
             'status': 'success',
-            'explanation': suggestions.get('explanation', ''),
-            'operations': suggestions.get('operations', []),
             'workspace_dir': workspace_dir,
             'structure': structure,
+            'suggestions': suggestions,
             'requires_approval': True
         })
-            
+        
     except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
-        print(f"Error in process endpoint:\n{error_trace}")
         return jsonify({
             'status': 'error',
-            'message': f"Request processing error: {str(e)}",
-            'trace': error_trace if app.debug else None
+            'message': str(e)
         }), 500
 
 @app.route('/workspace/delete', methods=['POST'])
@@ -607,44 +552,89 @@ def get_file_content():
         file_path = data.get('file_path')
         
         if not workspace_dir or not file_path:
-            return jsonify({'error': 'Missing workspace_dir or file_path'}), 400
+            return jsonify({'status': 'error', 'message': 'Missing workspace_dir or file_path'}), 400
             
         # Validate file path to prevent directory traversal
         if '..' in file_path or file_path.startswith('/'):
-            return jsonify({'error': 'Invalid file path'}), 400
+            return jsonify({'status': 'error', 'message': 'Invalid file path'}), 400
             
-        # Ensure the file is within the workspace
-        full_path = os.path.abspath(os.path.join(workspace_dir, file_path))
-        if not full_path.startswith(os.path.abspath(workspace_dir)):
-            return jsonify({'error': 'File path not within workspace'}), 400
+        # Get the full path by joining workspace_dir and file_path
+        full_path = os.path.normpath(os.path.join(workspace_dir, file_path))
             
-        full_path = os.path.join(workspace_dir, file_path)
+        print(f"Workspace: {workspace_dir}")  # Debug log
+        print(f"File path: {file_path}")  # Debug log
+        print(f"Full path: {full_path}")  # Debug log
+            
+        if not os.path.abspath(full_path).startswith(os.path.abspath(workspace_dir)):
+            return jsonify({'status': 'error', 'message': 'File path not within workspace'}), 400
+            
         if not os.path.exists(full_path):
+            print(f"File not found: {full_path}")  # Debug log
             return jsonify({
                 'status': 'success',
-                'content': ''  # Return empty content for new files
+                'content': '',  # Return empty content for new files
+                'file_size': 0,
+                'truncated': False
             })
+        
+        # Get file size
+        try:
+            file_size = os.path.getsize(full_path)
+            print(f"File size for {full_path}: {file_size} bytes")  # Debug log
+        except OSError as e:
+            print(f"Error getting file size: {str(e)}")  # Debug log
+            file_size = 0
         
         # Check if it's a large file
         if is_large_file(full_path):
             preview_content = get_file_preview(full_path)
+            print(f"Large file preview length: {len(preview_content)}")  # Debug log
             return jsonify({
                 'status': 'success',
                 'content': preview_content,
                 'truncated': True,
-                'file_size': get_file_size(full_path)
+                'file_size': file_size
             })
         
-        with open(full_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        content = None
+        try:
+            # Try UTF-8 first
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                print(f"File content length (UTF-8): {len(content)}")  # Debug log
+        except UnicodeDecodeError:
+            try:
+                # Try with latin-1 encoding if UTF-8 fails
+                with open(full_path, 'r', encoding='latin-1') as f:
+                    content = f.read()
+                    print(f"File content length (latin-1): {len(content)}")  # Debug log
+            except Exception as e:
+                print(f"Error reading file with latin-1: {str(e)}")  # Debug log
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Could not read file: invalid encoding'
+                }), 500
+        except Exception as e:
+            print(f"Error reading file with UTF-8: {str(e)}")  # Debug log
+            return jsonify({
+                'status': 'error',
+                'message': f'Could not read file: {str(e)}'
+            }), 500
+            
+        if content is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'Could not read file content'
+            }), 500
             
         return jsonify({
             'status': 'success',
             'content': content,
             'truncated': False,
-            'file_size': get_file_size(full_path)
+            'file_size': file_size
         })
     except Exception as e:
+        print(f"Error in get_file_content: {str(e)}")  # Debug log
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -704,35 +694,27 @@ def chat():
         model_id = data.get('model_id', 'deepseek')
         attachments = data.get('attachments', [])
         
-        print(f"\nReceived chat request with {len(attachments)} attachments:")
-        for attachment in attachments:
-            print(f"- Attachment: {attachment['name']}")
-            print(f"  Content length: {len(attachment['content'])} characters")
-        
         if not prompt:
             return jsonify({'error': 'No prompt provided'}), 400
             
         if not workspace_dir or not os.path.exists(workspace_dir):
             return jsonify({'error': 'Invalid workspace directory'}), 400
         
-        workspace_context = get_workspace_context(workspace_dir)
+        # Use workspace manager to get relevant files based on the query
+        files_content = workspace_manager.get_workspace_files(workspace_dir, query=prompt)
         
         # Add attachment contents to the context
         if attachments:
-            print("\nProcessing attachments for chat context:")
-            workspace_context += "\n\nAttached files:\n\n"
             for attachment in attachments:
-                print(f"- Adding {attachment['name']} to context")
-                workspace_context += f"File: {attachment['name']}\nContent:\n{attachment['content']}\n\n"
+                files_content[f"[ATTACHMENT] {attachment['name']}"] = attachment['content']
         
-        print("\nFinal context with attachments:")
-        print("---")
-        print(workspace_context)
-        print("---")
+        # Build context from files
+        context = "Here are the relevant files in the workspace:\n\n"
+        for file_path, content in files_content.items():
+            context += f"File: {file_path}\nContent:\n{content}\n\n"
         
         system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss the code in the workspace.
-Current workspace contains the following files:
-{workspace_context}
+{context}
 
 Please provide helpful responses about the code and files in this workspace."""
 
@@ -832,42 +814,30 @@ def serve_favicon():
     return send_from_directory('static', 'favicon.svg', mimetype='image/svg+xml')
 
 @app.route('/apply_changes', methods=['POST'])
-def apply_approved_changes():
+def apply_changes_endpoint():
     try:
         data = request.json
         workspace_dir = data.get('workspace_dir')
-        operations = data.get('operations')
+        operations = data.get('operations', [])
         
-        if not workspace_dir or not operations:
-            return jsonify({'error': 'Missing workspace_dir or operations'}), 400
+        if not workspace_dir:
+            return jsonify({'status': 'error', 'message': 'No workspace directory provided'}), 400
             
-        if not os.path.exists(workspace_dir):
-            return jsonify({'error': 'Invalid workspace directory'}), 400
+        if not operations:
+            return jsonify({'status': 'error', 'message': 'No operations to apply'}), 400
         
         # Apply the changes
-        results = apply_changes({
-            'operations': operations
-        }, workspace_dir)
+        results = apply_changes({'operations': operations}, workspace_dir)
         
-        structure = get_workspace_structure(workspace_dir)
-        
-        # Get list of modified files from results
-        modified_files = [result['operation']['path'] for result in results 
-                         if result['status'] == 'success']
-        
-        # Notify all clients about the changes
-        workspace_id = os.path.basename(workspace_dir)
-        socketio.emit('changes_applied', {
-            'workspace_id': workspace_id,
-            'modified_files': modified_files
-        })
+        # Get updated workspace structure
+        structure = workspace_manager.get_workspace_structure(workspace_dir)
         
         return jsonify({
             'status': 'success',
-            'message': 'Changes applied successfully',
-            'structure': structure
+            'structure': structure,
+            'results': results
         })
-            
+        
     except Exception as e:
         return jsonify({
             'status': 'error',
@@ -960,7 +930,38 @@ def apply_changes(suggestions, workspace_dir):
                 # Add linter status field
                 operation['linter_status'] = True  # Default to True
                 
-                if operation['type'] == 'create_file':
+                if operation['type'] == 'edit_file':
+                    file_path = os.path.join(workspace_dir, operation['path'])
+                    
+                    # Read the current content
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # Apply the changes
+                    new_content = content
+                    for change in operation['changes']:
+                        if (len(change['old'].splitlines()) == 1 and 
+                            not any(c in change['old'] for c in '{}()[]') and
+                            not change['old'].strip().startswith(('def ', 'class ', 'import ', 'from '))):
+                            new_content = new_content.replace(change['old'], change['new'])
+                        else:
+                            pos = new_content.find(change['old'])
+                            if pos != -1:
+                                new_content = new_content[:pos] + change['new'] + new_content[pos + len(change['old']):]
+                    
+                    # Write the updated content
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(new_content)
+                    
+                    # Run appropriate linter
+                    operation['linter_status'] = workspace_manager.run_linter(file_path)
+                    
+                    results.append({
+                        'status': 'success',
+                        'operation': operation
+                    })
+
+                elif operation['type'] == 'create_file':
                     # Create the file
                     file_path = os.path.join(workspace_dir, operation['path'])
                     os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -969,25 +970,12 @@ def apply_changes(suggestions, workspace_dir):
                         f.write(operation['content'])
                     
                     # Run appropriate linter
-                    operation['linter_status'] = run_linter(file_path)
-
-                elif operation['type'] == 'edit_file':
-                    file_path = os.path.join(workspace_dir, operation['path'])
+                    operation['linter_status'] = workspace_manager.run_linter(file_path)
                     
-                    # Read the current content
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    
-                    # Apply the changes
-                    for change in operation['changes']:
-                        content = content.replace(change['old'], change['new'])
-                    
-                    # Write the updated content
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(content)
-                    
-                    # Run appropriate linter
-                    operation['linter_status'] = run_linter(file_path)
+                    results.append({
+                        'status': 'success',
+                        'operation': operation
+                    })
 
                 elif operation['type'] == 'rename_file':
                     old_path = os.path.join(workspace_dir, operation['path'])
@@ -1001,17 +989,35 @@ def apply_changes(suggestions, workspace_dir):
                     
                     # No linting needed for rename operations
                     operation['linter_status'] = True
-                
-                results.append({
-                    'status': 'success',
-                    'operation': operation
-                })
+                    
+                    results.append({
+                        'status': 'success',
+                        'operation': operation
+                    })
+
+                elif operation['type'] == 'remove_file':
+                    file_path = os.path.join(workspace_dir, operation['path'])
+                    os.remove(file_path)
+                    results.append({
+                        'status': 'success',
+                        'operation': operation
+                    })
+
             except Exception as e:
                 results.append({
                     'status': 'error',
                     'operation': operation,
                     'error': str(e)
                 })
+                
+        # Notify all clients about the changes
+        workspace_id = os.path.basename(workspace_dir)
+        modified_files = [result['operation']['path'] for result in results 
+                         if result['status'] == 'success']
+        socketio.emit('changes_applied', {
+            'workspace_id': workspace_id,
+            'modified_files': modified_files
+        })
                 
         return results
     except Exception as e:
@@ -1028,27 +1034,67 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
     try:
         socketio.emit('status', {'message': 'Analyzing files...', 'step': 1})
         print("\n=== Step 1: Analyzing files ===")
-        # First send all files to AI for analysis
-        files_list = []
-        for file_path, content in files_content.items():
-            files_list.append(f"File: {file_path}\nContent:\n{content}\n")
         
+        # Build analysis prompt
+        workspace_files = []
+        attachment_files = []
+        
+        for file_path, content in files_content.items():
+            if file_path.startswith('[ATTACHMENT]'):
+                attachment_files.append(f"File: {file_path}\nContent:\n{content}\n")
+            else:
+                workspace_files.append(f"File: {file_path}\nContent:\n{content}\n")
+        
+        # Construct the analysis prompt with clear sections
         analysis_prompt = f"""Based on this request: {prompt}
 
-Here are all the files in the workspace:
+Here are the current files in the workspace:
 
-{chr(10).join(files_list)}
+{chr(10).join(workspace_files)}"""
 
-Analyze these files and determine:
+        if attachment_files:
+            analysis_prompt += f"""
+
+Here are the attached reference files:
+
+{chr(10).join(attachment_files)}"""
+
+        analysis_prompt += """
+
+Please analyze these files and determine:
 1. Which files need to be modified
 2. What specific changes are needed in each file
 3. Whether any new files need to be created
 4. Whether any files need to be deleted
 
+Use the attached files (if any) as reference for:
+- Code patterns and style
+- Implementation examples
+- Configuration formats
+- Similar functionality
+
 Return a JSON object with the operations needed. Only include files that actually need changes.
 Do not include files in the operations if they don't need modifications.
 
-IMPORTANT: Return the JSON object directly, not inside a code block."""
+The response MUST be a valid JSON object with this exact structure:
+{
+    "explanation": "Brief explanation of what you will do",
+    "operations": [
+        {
+            "type": "edit_file",
+            "path": "relative/path",
+            "changes": [
+                {
+                    "old": "text to replace",
+                    "new": "replacement text"
+                }
+            ],
+            "explanation": "why this change is needed"
+        }
+    ]
+}
+
+IMPORTANT: Return ONLY the JSON object, with no additional text or code blocks."""
 
         socketio.emit('status', {'message': 'Sending request to AI...', 'step': 2})
         print("\nSending analysis request...")
@@ -1094,44 +1140,33 @@ IMPORTANT: Return the JSON object directly, not inside a code block."""
         print("\nFull response length:", len(full_text))
         print("\nFirst 500 chars:", full_text[:500])
         
-        # Try to parse the response in different ways
-        result = None
+        # Clean up the response text
+        cleaned_text = full_text.strip()
+        
+        # Remove any markdown code block markers
+        if cleaned_text.startswith('```') and cleaned_text.endswith('```'):
+            cleaned_text = cleaned_text[3:-3].strip()
+        if cleaned_text.startswith('```json') and cleaned_text.endswith('```'):
+            cleaned_text = cleaned_text[7:-3].strip()
+        
+        # Try to parse the cleaned response
         try:
-            # First try direct JSON parsing
-            result = json.loads(full_text)
+            result = json.loads(cleaned_text)
             if isinstance(result, dict) and 'operations' in result:
                 return result
         except json.JSONDecodeError:
-            pass
-
-        # Try to extract JSON from code blocks
-        if not result:
-            matches = re.finditer(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', full_text)
+            # If direct parsing fails, try to find a JSON object in the text
+            matches = re.finditer(r'\{(?:[^{}]|(?R))*\}', cleaned_text)
             for match in matches:
                 try:
-                    json_str = match.group(1).strip()
+                    json_str = match.group(0)
                     result = json.loads(json_str)
                     if isinstance(result, dict) and 'operations' in result:
                         return result
                 except:
                     continue
         
-        # Try to find any JSON object
-        if not result:
-            matches = re.finditer(r'\{[\s\S]*?\}', full_text)
-            for match in matches:
-                try:
-                    json_str = match.group(0).strip()
-                    result = json.loads(json_str)
-                    if isinstance(result, dict) and 'operations' in result:
-                        return result
-                except:
-                    continue
-        
-        if not result:
-            raise ValueError("Could not find valid JSON response")
-        
-        return result
+        raise ValueError("Could not find valid JSON response. Please try again with a clearer prompt.")
         
     except Exception as e:
         socketio.emit('status', {'message': f'Error: {str(e)}', 'step': -1})
