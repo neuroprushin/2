@@ -396,7 +396,10 @@ def index():
 def create_new_workspace():
     try:
         workspace_id, workspace_dir = create_workspace()
-        structure = get_workspace_structure(workspace_dir)
+        
+        # Return empty structure for new workspace
+        structure = []
+        
         return jsonify({
             'status': 'success',
             'workspace_id': workspace_id,
@@ -404,6 +407,7 @@ def create_new_workspace():
             'structure': structure
         })
     except Exception as e:
+        print(f"Error creating workspace: {str(e)}")  # Add debug logging
         return jsonify({
             'status': 'error',
             'message': str(e)
