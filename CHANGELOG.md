@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.8] - 2024-01-09
+
+### Added
+- AI-Powered Analysis functionality:
+  - Code pattern recognition and suggestions
+  - Best practices recommendations
+  - Dependency analysis and visualization
+  - Performance optimization tips
+  - Security vulnerability scanning
+  - Code quality assessment
+
+### Enhanced
+- Large codebase support:
+  - Efficient handling of large directories
+  - Paginated directory browsing
+  - Lazy loading of folder contents
+  - Memory-optimized file tree
+  - Progress indicators for large operations
+
+### Fixed
+- Directory path handling in workspace manager
+- File tree expansion and navigation
+- Error handling for invalid directories
+
 ## [0.0.7] - 2024-01-08
 
 ### Changed
