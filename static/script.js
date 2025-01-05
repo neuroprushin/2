@@ -753,7 +753,7 @@ function buildTree(structure, container, parentPath = '') {
             const codeGenBtn = document.createElement('button');
             codeGenBtn.className = 'code-gen-btn';
             codeGenBtn.innerHTML = '<i class="fas fa-code"></i>';
-            codeGenBtn.title = 'Generate/Modify Code';
+            codeGenBtn.title = 'Get Code Insights';
             codeGenBtn.onclick = (e) => {
                 e.stopPropagation();
                 getCodeGeneration(fullPath, 'file');
@@ -2094,10 +2094,6 @@ async function getCodeGeneration(path, type) {
     const prompt = type === 'directory' ? 
         `Please help me modify or generate code for the folder "${path}". Suggest improvements, new files, or modifications.` :
         `Please help me modify or generate code for the file "${path}". Suggest improvements or modifications.`;
-    
-    // Focus the code tab
-    document.getElementById('codeMode').classList.remove('hidden');
-    document.getElementById('chatMode').classList.add('hidden');
     
     // Set the prompt in the input field
     const promptInput = document.getElementById('promptInput');
