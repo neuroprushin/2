@@ -3,6 +3,7 @@ let currentWorkspace = null;
 let currentModel = 'deepseek';
 let pendingChanges = null;
 let socket = null;
+let expandedDirs = new Map(); // Track expanded directories and their pagination state
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', () => {
@@ -452,10 +453,127 @@ function updateWorkspaceInfo(id) {
 }
 
 // File Tree Management
+async function expandDirectory(dirElement, path) {
+    const isExpanded = dirElement.getAttribute('aria-expanded') === 'true';
+    const childrenContainer = dirElement.nextElementSibling;
+    
+    if (isExpanded) {
+        // Collapse directory
+        dirElement.setAttribute('aria-expanded', 'false');
+        childrenContainer.innerHTML = '';
+        expandedDirs.delete(path);
+        return;
+    }
+    
+    // Expand directory
+    dirElement.setAttribute('aria-expanded', 'true');
+    
+    try {
+        // Get or initialize pagination state
+        let paginationState = expandedDirs.get(path) || { page: 1, hasMore: true, loading: false };
+        if (paginationState.loading) return;
+        
+        paginationState.loading = true;
+        expandedDirs.set(path, paginationState);
+        
+        const response = await fetch('/workspace/expand', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                workspace_dir: currentWorkspace,
+                dir_path: path,
+                page: paginationState.page,
+                page_size: 100
+            })
+        });
+        
+        const data = await response.json();
+        if (data.status === 'success') {
+            // Create or get the children container
+            if (!childrenContainer) {
+                const newContainer = document.createElement('div');
+                newContainer.className = 'pl-4';
+                dirElement.parentNode.insertBefore(newContainer, dirElement.nextSibling);
+            }
+            
+            // Append new items
+            data.items.forEach(item => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'flex items-center py-1';
+                
+                if (item.type === 'directory') {
+                    itemDiv.innerHTML = `
+                        <div class="flex items-center cursor-pointer hover:text-blue-400 w-full" 
+                             onclick="expandDirectory(this, '${item.path}')"
+                             aria-expanded="false">
+                            <i class="fas fa-folder mr-2 text-gray-400"></i>
+                            <span class="truncate">${item.path.split('/').pop()}</span>
+                        </div>
+                    `;
+                } else {
+                    itemDiv.innerHTML = `
+                        <div class="flex items-center cursor-pointer hover:text-blue-400 w-full"
+                             onclick="selectFile('${item.path}')">
+                            <i class="fas fa-file mr-2 text-gray-400"></i>
+                            <span class="truncate">${item.path.split('/').pop()}</span>
+                        </div>
+                    `;
+                }
+                
+                childrenContainer.appendChild(itemDiv);
+            });
+            
+            // Update pagination state
+            paginationState.hasMore = data.has_more;
+            paginationState.page++;
+            paginationState.loading = false;
+            expandedDirs.set(path, paginationState);
+            
+            // Add "Load More" button if there are more items
+            if (data.has_more) {
+                const loadMoreDiv = document.createElement('div');
+                loadMoreDiv.className = 'text-center py-2';
+                loadMoreDiv.innerHTML = `
+                    <button class="text-sm text-blue-400 hover:text-blue-300"
+                            onclick="loadMoreItems('${path}')">
+                        Load More...
+                    </button>
+                `;
+                childrenContainer.appendChild(loadMoreDiv);
+            }
+        }
+    } catch (error) {
+        console.error('Error expanding directory:', error);
+        showError('Failed to expand directory: ' + error.message);
+    }
+}
+
+async function loadMoreItems(path) {
+    const paginationState = expandedDirs.get(path);
+    if (!paginationState || paginationState.loading || !paginationState.hasMore) return;
+    
+    // Find the directory element and its children container
+    const dirElement = Array.from(document.querySelectorAll('[aria-expanded="true"]'))
+        .find(el => el.querySelector('span').textContent === path.split('/').pop());
+    
+    if (dirElement) {
+        const childrenContainer = dirElement.nextElementSibling;
+        // Remove the existing "Load More" button
+        const loadMoreButton = childrenContainer.querySelector('button');
+        if (loadMoreButton) {
+            loadMoreButton.parentElement.remove();
+        }
+        
+        // Load the next page
+        await expandDirectory(dirElement, path);
+    }
+}
+
 function updateWorkspaceTree(structure) {
     const workspaceTree = document.getElementById('workspaceTree');
     if (workspaceTree) {
         workspaceTree.innerHTML = '';
+        expandedDirs.clear(); // Reset expanded directories state
         buildTree(structure, workspaceTree);
     }
 }
@@ -465,8 +583,9 @@ function buildTree(structure, container, parentPath = '') {
         const itemDiv = document.createElement('div');
         itemDiv.className = `tree-item ${item.type === 'directory' ? 'folder' : 'file'}`;
         
-        // Construct the full path by combining parent path with current item
-        const relativePath = parentPath ? `${parentPath}/${item.path}` : item.path;
+        // Construct the full path by combining parent path with current item path
+        const itemPath = item.path;
+        const fullPath = parentPath ? `${parentPath}/${itemPath}` : itemPath;
         
         if (item.type === 'directory') {
             const folderHeader = document.createElement('div');
@@ -478,68 +597,157 @@ function buildTree(structure, container, parentPath = '') {
             
             const name = document.createElement('span');
             name.className = 'name text-gray-300';
-            name.textContent = item.path.split('/').pop();
+            name.textContent = itemPath.split('/').pop();
             folderHeader.appendChild(name);
+            
+            // Add recommendation button
+            const recBtn = document.createElement('button');
+            recBtn.className = 'recommendation-btn';
+            recBtn.innerHTML = '<i class="fas fa-brain"></i>';
+            recBtn.title = 'Get AI insights';
+            recBtn.onclick = (e) => {
+                e.stopPropagation();
+                getRecommendations(fullPath, 'directory');
+            };
+            folderHeader.appendChild(recBtn);
             
             itemDiv.appendChild(folderHeader);
             
             const children = document.createElement('div');
-            children.className = 'children ml-4 mt-1';
+            children.className = 'children';
             itemDiv.appendChild(children);
             
-            // Load children immediately if they exist in the structure
-            if (item.children && item.children.length > 0) {
-                buildTree(item.children, children, relativePath);
-            }
+            // Store the full path as a data attribute
+            folderHeader.dataset.path = fullPath;
             
             // Handle folder click for expanding/collapsing
             folderHeader.onclick = async (e) => {
-                e.stopPropagation(); // Prevent event bubbling
+                e.stopPropagation();
                 
-                if (!itemDiv.classList.contains('expanded')) {
-                    // Load children if they haven't been loaded yet
-                    if (!children.hasChildNodes() && item.has_children) {
-                        try {
-                            console.log('Expanding directory:', relativePath); // Debug log
-                            const response = await fetch('/workspace/expand', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ 
-                                    workspace_dir: currentWorkspace,
-                                    dir_path: relativePath 
-                                })
-                            });
-                            
-                            const data = await response.json();
-                            console.log('Expansion response:', data); // Debug log
-                            if (data.status === 'success' && data.children) {
-                                children.innerHTML = ''; // Clear any existing content
-                                buildTree(data.children, children, relativePath);
-                            }
-                        } catch (error) {
-                            console.error('Error expanding directory:', error);
-                        }
-                    }
-                }
-                
+                // Toggle expanded state
                 itemDiv.classList.toggle('expanded');
                 icon.className = itemDiv.classList.contains('expanded') ? 
                     'fas fa-folder-open text-yellow-400' : 
                     'fas fa-folder text-yellow-400';
+
+                // Debug logs
+                console.log('Folder clicked:', {
+                    fullPath: fullPath,
+                    isExpanded: itemDiv.classList.contains('expanded'),
+                    hasChildren: item.has_children,
+                    currentChildren: children.hasChildNodes(),
+                    workspace: currentWorkspace
+                });
+                
+                // Only fetch if we're expanding and there are no children yet
+                if (itemDiv.classList.contains('expanded') && !children.hasChildNodes() && item.has_children) {
+                    try {
+                        children.innerHTML = '<div class="text-gray-400 pl-4"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+                        
+                        const requestData = {
+                            workspace_dir: currentWorkspace,
+                            dir_path: fullPath,  // Use the full path here
+                            page: 1,
+                            page_size: 100
+                        };
+                        
+                        console.log('Sending request to expand folder:', requestData);
+                        
+                        const response = await fetch('/workspace/expand', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestData)
+                        });
+                        
+                        const data = await response.json();
+                        console.log('Raw server response:', data);
+                        
+                        if (response.ok && data.status === 'success') {
+                            children.innerHTML = '';
+                            
+                            // Validate response data
+                            if (!data.items) {
+                                console.error('No items array in response:', data);
+                                throw new Error('Invalid response format: missing items array');
+                            }
+                            
+                            if (!Array.isArray(data.items)) {
+                                console.error('Items is not an array:', data.items);
+                                throw new Error('Invalid response format: items is not an array');
+                            }
+                            
+                            if (data.items.length > 0) {
+                                console.log('Processing items:', data.items);
+                                
+                                // Validate each item
+                                data.items.forEach((item, index) => {
+                                    if (!item.type || !item.path) {
+                                        console.error(`Invalid item at index ${index}:`, item);
+                                        throw new Error(`Invalid item format at index ${index}`);
+                                    }
+                                });
+                                
+                                // Pass the current full path as parent path for nested items
+                                buildTree(data.items, children, fullPath);
+                                
+                                // Add "Load More" button if there are more items
+                                if (data.has_more) {
+                                    const loadMoreDiv = document.createElement('div');
+                                    loadMoreDiv.className = 'text-center py-2';
+                                    loadMoreDiv.innerHTML = `
+                                        <button class="text-sm text-blue-400 hover:text-blue-300"
+                                                onclick="loadMoreItems('${fullPath}')">
+                                            Load More (${data.total_items - data.items.length} more)
+                                        </button>
+                                    `;
+                                    children.appendChild(loadMoreDiv);
+                                }
+                                
+                                console.log('Successfully built tree with', data.items.length, 'items');
+                            } else {
+                                console.log('Folder is empty');
+                                children.innerHTML = '<div class="text-gray-400 pl-4">Empty folder</div>';
+                            }
+                        } else {
+                            console.error('Server error response:', data);
+                            throw new Error(data.message || 'Failed to load folder contents');
+                        }
+                    } catch (error) {
+                        console.error('Error in folder expansion:', error);
+                        children.innerHTML = `<div class="text-red-400 pl-4">Error: ${error.message}</div>`;
+                        // On error, collapse the folder
+                        itemDiv.classList.remove('expanded');
+                        icon.className = 'fas fa-folder text-yellow-400';
+                        
+                        // Show error notification
+                        showError(`Failed to load folder contents: ${error.message}`);
+                    }
+                }
             };
         } else {
             const fileHeader = document.createElement('div');
             fileHeader.className = 'file-header flex items-center gap-2 p-1 hover:bg-gray-700 rounded cursor-pointer';
             
             const icon = document.createElement('i');
-            const iconClass = getFileIcon(item.path);
+            const iconClass = getFileIcon(itemPath);
             icon.className = `fas ${iconClass}`;
             fileHeader.appendChild(icon);
             
             const name = document.createElement('span');
             name.className = 'name text-gray-300';
-            name.textContent = item.path.split('/').pop();
+            name.textContent = itemPath.split('/').pop();
             fileHeader.appendChild(name);
+            
+            // Add recommendation button
+            const recBtn = document.createElement('button');
+            recBtn.className = 'recommendation-btn';
+            recBtn.innerHTML = '<i class="fas fa-brain"></i>';
+            recBtn.title = 'Get AI insights';
+            recBtn.onclick = (e) => {
+                e.stopPropagation();
+                getRecommendations(fullPath, 'file');
+            };
+            fileHeader.appendChild(recBtn);
             
             // Show file size for large files
             if (item.size > 1024 * 1024) { // 1MB
@@ -551,11 +759,13 @@ function buildTree(structure, container, parentPath = '') {
             
             itemDiv.appendChild(fileHeader);
             
+            // Store the full path as a data attribute
+            fileHeader.dataset.path = fullPath;
+            
             // Add click handler to view file content
             fileHeader.onclick = (e) => {
-                e.stopPropagation(); // Prevent event bubbling
-                console.log('Opening file:', relativePath); // Debug log
-                showFileContent(relativePath);
+                e.stopPropagation();
+                showFileContent(fullPath);
             };
         }
         
@@ -1804,5 +2014,54 @@ async function selectFolderToImport(folder) {
         showError(error.message);
     } finally {
         hideLoading();
+    }
+}
+
+// Add this function to handle recommendations
+async function getRecommendations(path, type) {
+    if (!validateWorkspace()) return;
+    
+    const prompt = type === 'directory' ? 
+        `Please analyze this folder "${path}" and provide recommendations for best practices, potential improvements, and any issues to look out for.` :
+        `Please analyze this file "${path}" and provide recommendations for code improvements, best practices, and potential issues.`;
+    
+    // Focus the chat tab
+    document.getElementById('chatMode').classList.remove('hidden');
+    
+    // Add user message
+    appendChatMessage(prompt, 'user');
+    
+    // Show loading indicator
+    const loadingMessage = appendChatMessage('<i class="fas fa-spinner fa-spin"></i> Analyzing...', 'assistant', true);
+    
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                prompt: prompt,
+                workspace_dir: currentWorkspace,
+                model_id: document.getElementById('modelSelect').value,
+                context_path: path
+            })
+        });
+
+        const data = await response.json();
+        
+        // Remove loading message
+        loadingMessage.remove();
+
+        if (data.status === 'success') {
+            const formattedResponse = formatChatResponse(data.response);
+            appendChatMessage(formattedResponse, 'assistant', true);
+        } else {
+            appendErrorMessage(data.message || 'Failed to get recommendations');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        loadingMessage.remove();
+        appendErrorMessage('Error: ' + error.message);
     }
 } 
