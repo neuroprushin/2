@@ -567,10 +567,10 @@ async def process_prompt():
                                         files_content[rel_path] = f.read()
                                 except Exception as e:
                                     print(f"Error reading file {file_path}: {e}")
-                    chunks = workspace_manager.chunk_workspace_files(files_content)
+                    chunks = workspace_manager.chunk_workspace_files(files_content, system_prompt=system_prompt)
         else:
             # No context path, get relevant files based on the query in chunks
-            chunks = workspace_manager.get_workspace_files_chunked(workspace_dir, query=prompt)
+            chunks = workspace_manager.get_workspace_files_chunked(workspace_dir, query=prompt, system_prompt=system_prompt)
 
         # Process chunks in parallel
         socketio.emit('status', {'message': 'Processing files in parallel...', 'step': 2})
@@ -824,33 +824,48 @@ def chat():
             for attachment in attachments:
                 files_content[f"[ATTACHMENT] {attachment['name']}"] = attachment['content']
         
-        # Build context from files
-        context = "Here are the relevant files in the workspace:\n\n"
-        for file_path, content in files_content.items():
-            context += f"File: {file_path}\nContent:\n{content}\n\n"
+        # Split files into chunks that respect token limits
+        chunks = workspace_manager.chunk_workspace_files(files_content, system_prompt=system_prompt)
         
-        # Construct a more focused system message based on context
-        if context_path:
-            if os.path.isfile(os.path.join(workspace_dir, context_path)):
-                context_type = "file"
-            else:
-                context_type = "folder"
-            system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss code.
+        # Process each chunk and combine responses
+        all_responses = []
+        for i, chunk in enumerate(chunks):
+            # Build context from chunk files
+            context = "Here are the relevant files in the workspace:\n\n"
+            for file_path, content in chunk.items():
+                context += f"File: {file_path}\nContent:\n{content}\n\n"
+            
+            # Construct a more focused system message based on context
+            if context_path:
+                if os.path.isfile(os.path.join(workspace_dir, context_path)):
+                    context_type = "file"
+                else:
+                    context_type = "folder"
+                system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss code.
 You are currently analyzing this specific {context_type}: {context_path}
 {context}
 
 Please provide helpful responses focused on this {context_type} and its contents."""
-        else:
-            system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss the code in the workspace.
+            else:
+                system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss the code in the workspace.
 {context}
 
 Please provide helpful responses about the code and files in this workspace."""
 
-        response = get_chat_response(system_message, prompt, model_id)
+            socketio.emit('status', {
+                'message': f'Processing chunk {i + 1}/{len(chunks)}...',
+                'step': i + 1
+            })
+
+            response = get_chat_response(system_message, prompt, model_id)
+            all_responses.append(response)
+        
+        # Combine all responses
+        combined_response = "\n\n".join(all_responses)
         
         return jsonify({
             'status': 'success',
-            'response': response
+            'response': combined_response
         })
             
     except Exception as e:
@@ -918,9 +933,10 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
             # Use Anthropic's client interface
             response = client.messages.create(
                 model=model_config['models']['code'],
+                system=system_message,
                 messages=[{
                     "role": "user",
-                    "content": f"{system_message}\n\nUser: {user_message}"
+                    "content": user_message
                 }],
                 temperature=0.7,
                 max_tokens=2048

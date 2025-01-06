@@ -672,12 +672,39 @@ class WorkspaceManager:
         
         return False 
     
-    def chunk_workspace_files(self, files_content: Dict[str, str], max_tokens: int = None) -> List[Dict[str, Dict[str, str]]]:
+    def estimate_tokens(self, text: str) -> int:
+        """Estimate the number of tokens in a text string.
+        
+        This is a more accurate estimation than the simple char/4 method:
+        - Each word is roughly 1.3 tokens
+        - Each punctuation is a token
+        - Each newline is a token
+        - Each number is roughly 1 token per 2-3 digits
+        """
+        # Split into words
+        words = text.split()
+        # Count base tokens (words)
+        token_count = len(words) * 1.3
+        # Add tokens for punctuation and special characters
+        token_count += text.count('.') + text.count(',') + text.count('!') + text.count('?')
+        token_count += text.count('(') + text.count(')') + text.count('[') + text.count(']')
+        token_count += text.count('{') + text.count('}') + text.count(':') + text.count(';')
+        # Add tokens for newlines
+        token_count += text.count('\n')
+        # Add tokens for numbers (roughly 1 token per 2-3 digits)
+        import re
+        numbers = re.findall(r'\d+', text)
+        for num in numbers:
+            token_count += len(num) / 2.5
+        return int(token_count)
+
+    def chunk_workspace_files(self, files_content: Dict[str, str], max_tokens: int = None, system_prompt: str = "") -> List[Dict[str, Dict[str, str]]]:
         """Split workspace files into chunks that respect the token limit.
         
         Args:
             files_content: Dictionary mapping file paths to their contents
             max_tokens: Maximum tokens per chunk (defaults to MAX_TOKENS_PER_REQUEST - TOKEN_BUFFER)
+            system_prompt: The system prompt to account for in token calculation
             
         Returns:
             List of dictionaries, each containing a subset of files that fits within token limit
@@ -689,11 +716,18 @@ class WorkspaceManager:
         current_chunk = {}
         current_tokens = 0
         
+        # First, calculate tokens for system prompt and other fixed content
+        system_tokens = self.estimate_tokens(system_prompt) if system_prompt else 0
+        file_header_tokens = 10  # Tokens for "File: " and "Content:" headers
+        
+        # Adjust max_tokens to account for fixed content
+        available_tokens = max_tokens - system_tokens - self.TOKEN_BUFFER
+        
         for path, content in files_content.items():
-            # Estimate tokens (rough approximation: 4 chars = 1 token)
-            file_tokens = len(content) // 4
+            # Calculate tokens for this file's content plus its path
+            file_tokens = self.estimate_tokens(content) + self.estimate_tokens(path) + file_header_tokens
             
-            if current_tokens + file_tokens > max_tokens:
+            if current_tokens + file_tokens > available_tokens:
                 if current_chunk:  # Save current chunk if not empty
                     chunks.append(current_chunk)
                 current_chunk = {path: content}
@@ -705,15 +739,23 @@ class WorkspaceManager:
         if current_chunk:  # Add the last chunk if not empty
             chunks.append(current_chunk)
             
+        print(f"\nChunked {len(files_content)} files into {len(chunks)} chunks")
+        for i, chunk in enumerate(chunks):
+            chunk_size = sum(len(content) for content in chunk.values())
+            chunk_tokens = sum(self.estimate_tokens(content) + self.estimate_tokens(path) + file_header_tokens 
+                             for path, content in chunk.items())
+            print(f"Chunk {i+1}: {len(chunk)} files, ~{chunk_tokens} tokens, {chunk_size} bytes")
+            
         return chunks
 
-    def get_workspace_files_chunked(self, workspace_dir: str, query: str = None, max_tokens: int = None) -> List[Dict[str, Dict[str, str]]]:
+    def get_workspace_files_chunked(self, workspace_dir: str, query: str = None, max_tokens: int = None, system_prompt: str = "") -> List[Dict[str, Dict[str, str]]]:
         """Get workspace files split into chunks that respect the token limit.
         
         Args:
             workspace_dir: Path to the workspace directory
             query: Optional query to filter relevant files
             max_tokens: Maximum tokens per chunk
+            system_prompt: The system prompt to account for in token calculation
             
         Returns:
             List of chunked file contents, each chunk respecting token limit
@@ -722,7 +764,7 @@ class WorkspaceManager:
         files_content = self.get_workspace_files(workspace_dir, query)
         
         # Split into chunks
-        return self.chunk_workspace_files(files_content, max_tokens)
+        return self.chunk_workspace_files(files_content, max_tokens, system_prompt)
 
     async def process_chunks_parallel(self, chunks: List[Dict[str, Dict[str, str]]], prompt: str, model_id: str) -> List[Dict]:
         """Process file chunks in parallel.
@@ -808,21 +850,25 @@ class WorkspaceManager:
                         print("Sending request to Claude model...")
                         # Claude uses a different message format
                         system_content = f"{system_prompt}\n\nWorkspace context:\n{context}"
-                        response = client.messages.create(
-                            model=model_config['models']['code'],
-                            system=system_content,
-                            messages=[{
-                                "role": "user",
-                                "content": prompt
-                            }],
-                            temperature=0.7,
-                            max_tokens=2048
-                        )
-                        # Claude's response format is different from OpenAI's
-                        if hasattr(response, 'content') and len(response.content) > 0:
-                            full_text = response.content[0].text
-                        else:
-                            print("Error: No content in Claude's response")
+                        try:
+                            response = client.messages.create(
+                                model=model_config['models']['code'],
+                                system=system_content,
+                                messages=[{
+                                    "role": "user",
+                                    "content": prompt
+                                }],
+                                temperature=0.1,  # Lower temperature for code suggestions
+                                max_tokens=2048
+                            )
+                            # Claude's response format is different from OpenAI's
+                            if hasattr(response, 'content') and len(response.content) > 0:
+                                full_text = response.content[0].text
+                            else:
+                                print("Error: No content in Claude's response")
+                                return None
+                        except Exception as e:
+                            print(f"Error with Claude API: {str(e)}")
                             return None
                         print(f"\nResponse received in {time.time() - start_time:.1f}s")
                         print(f"Response length: {len(full_text)} characters")
