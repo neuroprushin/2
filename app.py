@@ -905,13 +905,17 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         print("\n=== Step 2: Sending Request to AI Model ===")
         
         if model_id == 'claude':
-            # Use Anthropic's client interface
+            # Use Anthropic's client interface with chat-focused system message
+            chat_system_message = """You are a helpful AI assistant that can discuss code and provide explanations.
+Please respond in a natural, conversational way. Do not format responses as code diffs or JSON operations.
+Instead, explain concepts, answer questions, and provide insights about the code in a clear, readable format."""
+
             response = client.messages.create(
                 model=model_config['models']['chat'],
-                system=system_message,
+                system=chat_system_message,
                 messages=[{
                     "role": "user",
-                    "content": user_message
+                    "content": f"Context:\n{system_message}\n\nQuestion: {user_message}"
                 }],
                 temperature=0.7,
                 max_tokens=2048
@@ -1309,8 +1313,16 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
             # Use Anthropic's client interface
             response = client.messages.create(
                 model=model_config['models']['code'],
-                system=system_prompt,
                 messages=[{
+                    "role": "system",
+                    "content": system_prompt
+                }] + ([{
+                    "role": "system",
+                    "content": f"Workspace context:\n{workspace_context}"
+                }] if workspace_context else []) + ([{
+                    "role": "system",
+                    "content": files_content_str
+                }] if files_content else []) + [{
                     "role": "user",
                     "content": prompt
                 }],
