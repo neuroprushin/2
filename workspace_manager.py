@@ -394,80 +394,52 @@ class WorkspaceManager:
         return context
     
     def get_workspace_files(self, workspace_dir: str, query: str = None) -> Dict[str, str]:
-        """Get relevant files from workspace based on query"""
-        files_content = {}
+        """Get contents of relevant files in the workspace.
         
-        # Get all files in workspace
-        all_files = []
-        for root, dirs, files in os.walk(workspace_dir):
-            # Skip ignored directories
-            dirs[:] = [d for d in dirs if d not in self.SKIP_FOLDERS]
+        Args:
+            workspace_dir: Path to workspace directory
+            query: Optional query to filter relevant files
             
+        Returns:
+            Dictionary mapping file paths to their contents
+        """
+        files_content = {}
+        total_size = 0
+        
+        for root, _, files in os.walk(workspace_dir):
             for file in files:
+                # Skip hidden files, specified extensions, and binary files
+                if (file.startswith('.') or 
+                    file.endswith(tuple(self.SKIP_EXTENSIONS))):
+                    continue
+                    
                 file_path = os.path.join(root, file)
                 rel_path = os.path.relpath(file_path, workspace_dir)
                 
-                # Skip files that are too large or binary
-                try:
-                    if os.path.getsize(file_path) > self.MAX_FILE_SIZE or self.is_binary_file(file_path):
-                        continue
-                except OSError:
-                    continue  # Skip files we can't access
-                    
-                all_files.append((file_path, rel_path))
-
-        # If no query, only include small files and files in root directory
-        if not query:
-            for file_path, rel_path in all_files:
-                try:
-                    if os.path.dirname(rel_path) == '' or os.path.getsize(file_path) < 50 * 1024:  # Root dir or < 50KB
-                        content = self._get_file_content(file_path)
-                        if content:
-                            files_content[rel_path] = content
-                except Exception as e:
-                    print(f"Warning: Could not read file {file_path}: {e}")
-            return files_content
-
-        # Score files based on relevance to query
-        scored_files = []
-        for file_path, rel_path in all_files:
-            score = 0
-            try:
-                # Check filename relevance
-                if any(term.lower() in rel_path.lower() for term in query.lower().split()):
-                    score += 5
-
-                # Quick content scan for relevance
+                # Skip binary files
+                if self.is_binary_file(file_path):
+                    print(f"Skipping binary file: {rel_path}")
+                    continue
+                
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
-                        preview = f.read(4096)  # Read first 4KB for preview
-                        if any(term.lower() in preview.lower() for term in query.lower().split()):
-                            score += 3
-                except UnicodeDecodeError:
-                    pass  # Skip binary files
-
-                # Consider file location
-                if os.path.dirname(rel_path) == '':  # Root directory
-                    score += 2
-                
-                # Consider file type
-                if rel_path.endswith(('.py', '.js', '.html', '.css', '.json', '.yml', '.yaml')):
-                    score += 1
-
-                if score > 0:
-                    scored_files.append((file_path, rel_path, score))
-            except Exception as e:
-                print(f"Warning: Could not analyze file {file_path}: {e}")
-
-        # Sort by score and get top relevant files
-        for file_path, rel_path, _ in sorted(scored_files, key=lambda x: x[2], reverse=True)[:10]:
-            try:
-                content = self._get_file_content(file_path)
-                if content:
-                    files_content[rel_path] = content
-            except Exception as e:
-                print(f"Warning: Could not read file {file_path}: {e}")
-
+                        content = f.read()
+                        # Skip empty files
+                        if not content.strip():
+                            continue
+                            
+                        file_size = len(content.encode('utf-8'))
+                        total_size += file_size
+                        
+                        files_content[rel_path] = content
+                        print(f"Added file: {rel_path} ({file_size} bytes)")
+                except Exception as e:
+                    print(f"Error reading file {file_path}: {e}")
+                    continue
+        
+        print(f"\nTotal files: {len(files_content)}")
+        print(f"Total size: {total_size} bytes")
+        
         return files_content
     
     def _analyze_dependencies(self, files_content: Dict[str, str]) -> Dict[str, Set[str]]:
@@ -723,23 +695,69 @@ class WorkspaceManager:
         # Adjust max_tokens to account for fixed content
         available_tokens = max_tokens - system_tokens - self.TOKEN_BUFFER
         
-        for path, content in files_content.items():
+        print(f"\n=== Chunking {len(files_content)} files ===")
+        print(f"System prompt tokens: {system_tokens}")
+        print(f"Available tokens per chunk: {available_tokens}")
+        
+        # Sort files by size to try to balance chunks better
+        sorted_files = sorted(files_content.items(), key=lambda x: len(x[1]))
+        
+        for path, content in sorted_files:
             # Calculate tokens for this file's content plus its path
             file_tokens = self.estimate_tokens(content) + self.estimate_tokens(path) + file_header_tokens
             
+            print(f"\nProcessing: {path}")
+            print(f"File tokens: {file_tokens}")
+            print(f"Current chunk tokens: {current_tokens}")
+            
             if current_tokens + file_tokens > available_tokens:
                 if current_chunk:  # Save current chunk if not empty
+                    print(f"Chunk full, saving {len(current_chunk)} files ({current_tokens} tokens)")
                     chunks.append(current_chunk)
-                current_chunk = {path: content}
-                current_tokens = file_tokens
+                    current_chunk = {}
+                    current_tokens = 0
+                
+                # If a single file is too large, split it
+                if file_tokens > available_tokens:
+                    print(f"File too large ({file_tokens} tokens), splitting: {path}")
+                    # Split content into smaller chunks that fit
+                    content_chunks = []
+                    remaining_content = content
+                    while remaining_content:
+                        # Calculate max content length that would fit in a chunk
+                        max_content_tokens = available_tokens - self.estimate_tokens(path) - file_header_tokens
+                        max_chars = int(max_content_tokens * 4)  # Rough estimate of chars per token
+                        
+                        if len(remaining_content) <= max_chars:
+                            content_chunks.append(remaining_content)
+                            remaining_content = ""
+                        else:
+                            # Try to split at a newline near the max length
+                            split_point = remaining_content.rfind('\n', 0, max_chars)
+                            if split_point == -1:
+                                split_point = max_chars
+                            
+                            content_chunks.append(remaining_content[:split_point])
+                            remaining_content = remaining_content[split_point:].lstrip()
+                    
+                    # Create a chunk for each part
+                    for i, chunk_content in enumerate(content_chunks):
+                        chunk_tokens = self.estimate_tokens(chunk_content) + self.estimate_tokens(path) + file_header_tokens
+                        print(f"Creating chunk for part {i+1}/{len(content_chunks)} ({chunk_tokens} tokens)")
+                        chunks.append({f"{path} (part {i+1}/{len(content_chunks)})": chunk_content})
+                else:
+                    current_chunk = {path: content}
+                    current_tokens = file_tokens
             else:
                 current_chunk[path] = content
                 current_tokens += file_tokens
         
         if current_chunk:  # Add the last chunk if not empty
+            print(f"\nSaving final chunk with {len(current_chunk)} files ({current_tokens} tokens)")
             chunks.append(current_chunk)
             
-        print(f"\nChunked {len(files_content)} files into {len(chunks)} chunks")
+        print(f"\n=== Chunking complete ===")
+        print(f"Created {len(chunks)} chunks")
         for i, chunk in enumerate(chunks):
             chunk_size = sum(len(content) for content in chunk.values())
             chunk_tokens = sum(self.estimate_tokens(content) + self.estimate_tokens(path) + file_header_tokens 

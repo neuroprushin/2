@@ -546,17 +546,16 @@ async def process_prompt():
         socketio.emit('status', {'message': 'Reading workspace files...', 'step': 1})
         
         # Get files in chunks that respect token limits
+        files_content = {}
         if context_path:
             full_path = os.path.join(workspace_dir, context_path)
             if os.path.exists(full_path):
                 if os.path.isfile(full_path):
                     # For a file, get its content directly
                     with open(full_path, 'r', encoding='utf-8') as f:
-                        files_content = {context_path: f.read()}
-                    chunks = [files_content]  # Single chunk for single file
+                        files_content[context_path] = f.read()
                 else:
-                    # For a directory, get contents of files within it in chunks
-                    files_content = {}
+                    # For a directory, get contents of files within it
                     for root, _, files in os.walk(full_path):
                         for file in files:
                             if not file.startswith('.') and not file.endswith(tuple(workspace_manager.SKIP_EXTENSIONS)):
@@ -567,11 +566,18 @@ async def process_prompt():
                                         files_content[rel_path] = f.read()
                                 except Exception as e:
                                     print(f"Error reading file {file_path}: {e}")
-                    chunks = workspace_manager.chunk_workspace_files(files_content, system_prompt=system_prompt)
         else:
-            # No context path, get relevant files based on the query in chunks
-            chunks = workspace_manager.get_workspace_files_chunked(workspace_dir, query=prompt, system_prompt=system_prompt)
+            # No context path, get relevant files based on the query
+            files_content = workspace_manager.get_workspace_files(workspace_dir, query=prompt)
 
+        # Add attachment contents to the context
+        if attachments:
+            for attachment in attachments:
+                files_content[f"[ATTACHMENT] {attachment['name']}"] = attachment['content']
+        
+        # Split files into chunks that respect token limits
+        chunks = workspace_manager.chunk_workspace_files(files_content, system_prompt=system_prompt)
+        
         # Process chunks in parallel
         socketio.emit('status', {'message': 'Processing files in parallel...', 'step': 2})
         suggestions_list = await workspace_manager.process_chunks_parallel(chunks, prompt, model_id)
@@ -1424,20 +1430,6 @@ def rename_file():
             'status': 'error',
             'message': str(e)
         }), 500
-
-def init_model_clients():
-    """Initialize API clients for each configured model"""
-    from openai import OpenAI
-    from anthropic import Anthropic
-    
-    if os.getenv('OPENAI_API_KEY'):
-        openai_client = OpenAI()
-        model_clients['deepseek'] = openai_client
-        model_clients['gpt-4'] = openai_client
-        model_clients['gpt-3.5-turbo'] = openai_client
-    
-    if os.getenv('ANTHROPIC_API_KEY'):
-        model_clients['claude'] = Anthropic()  # Use actual Anthropic client
 
 if __name__ == '__main__':
     # Watch static and template directories for changes
