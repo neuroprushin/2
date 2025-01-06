@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 import json
 import mmap
 from pathlib import Path
+import string
 
 class WorkspaceManager:
     # File size thresholds and constants
@@ -14,8 +15,25 @@ class WorkspaceManager:
     LAZY_LOAD_THRESHOLD = 1000  # Number of files before switching to lazy loading
     
     # File type configurations
-    BINARY_EXTENSIONS = {'.pyc', '.pyo', '.pyd', '.so', '.dll', '.exe', '.bin'}
-    SKIP_EXTENSIONS = {'.db'} | BINARY_EXTENSIONS
+    BINARY_EXTENSIONS = {
+        # Compiled files
+        '.pyc', '.pyo', '.pyd', '.so', '.dll', '.exe', '.bin', '.o', '.obj', '.lib', '.a', '.dylib',
+        # Image files
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.tiff', '.webp', '.heic',
+        # Audio/Video files
+        '.mp3', '.wav', '.ogg', '.mp4', '.avi', '.mov', '.flv', '.mkv', '.m4a', '.m4v',
+        # Archive files
+        '.zip', '.tar', '.gz', '.bz2', '.7z', '.rar', '.iso',
+        # Document files
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+        # Database files
+        '.db', '.sqlite', '.sqlite3', '.mdb',
+        # Font files
+        '.ttf', '.otf', '.woff', '.woff2', '.eot',
+        # Other binary files
+        '.class', '.jar', '.war', '.ear', '.pkl', '.h5', '.dat'
+    }
+    SKIP_EXTENSIONS = BINARY_EXTENSIONS
     SKIP_FOLDERS = {
         '.git',
         'node_modules',
@@ -374,32 +392,27 @@ class WorkspaceManager:
         return context
     
     def get_workspace_files(self, workspace_dir: str, query: str = None) -> Dict[str, str]:
-        """Get content of relevant files in workspace based on the query
-        
-        Args:
-            workspace_dir: The workspace directory path
-            query: The user's request/query to determine relevant files
-        """
-        if not os.path.exists(workspace_dir) or not os.path.isdir(workspace_dir):
-            raise ValueError('Invalid workspace directory')
-            
+        """Get relevant files from workspace based on query"""
         files_content = {}
         
-        # Get all potential files first
+        # Get all files in workspace
         all_files = []
         for root, dirs, files in os.walk(workspace_dir):
-            # Skip .git and other ignored directories
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in self.SKIP_FOLDERS]
+            # Skip ignored directories
+            dirs[:] = [d for d in dirs if d not in self.SKIP_FOLDERS]
             
             for file in files:
-                if (not file.endswith('.db') and 
-                    not file.startswith('.') and 
-                    not file.endswith(tuple(self.SKIP_EXTENSIONS))):
-                    file_path = os.path.join(root, file)
-                    rel_path = os.path.relpath(file_path, workspace_dir)
-                    # Skip if path matches gitignore patterns
-                    if not self._should_ignore(rel_path):
-                        all_files.append((file_path, rel_path))
+                file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(file_path, workspace_dir)
+                
+                # Skip files that are too large or binary
+                try:
+                    if os.path.getsize(file_path) > self.MAX_FILE_SIZE or self.is_binary_file(file_path):
+                        continue
+                except OSError:
+                    continue  # Skip files we can't access
+                    
+                all_files.append((file_path, rel_path))
 
         # If no query, only include small files and files in root directory
         if not query:
@@ -639,3 +652,20 @@ class WorkspaceManager:
                 processed.append(operation)
                 
         return processed 
+    
+    def is_binary_file(self, file_path: str) -> bool:
+        """Check if a file is binary based on extension or content analysis."""
+        # First check extension
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in self.BINARY_EXTENSIONS:
+            return True
+            
+        # If extension check fails, try to read the file
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                chunk = f.read(1024)  # Read first 1KB
+                return bool(chunk.translate(None, string.printable))  # Returns True if contains non-printable chars
+        except (UnicodeDecodeError, IOError):
+            return True  # If we can't read it as text, it's probably binary
+        
+        return False 
