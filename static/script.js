@@ -990,6 +990,13 @@ async function processPrompt() {
 
     showLoading();
     try {
+        // Extract context path from the prompt if it contains a file/folder path
+        let contextPath = null;
+        const pathMatch = prompt.match(/(?:folder|file) "([^"]+)"/);
+        if (pathMatch) {
+            contextPath = pathMatch[1];
+        }
+
         const response = await fetch('/process', {
             method: 'POST',
             headers: {
@@ -999,7 +1006,8 @@ async function processPrompt() {
                 prompt: prompt,
                 workspace_dir: currentWorkspace,
                 model_id: document.getElementById('modelSelect').value,
-                attachments: attachments
+                attachments: attachments,
+                context_path: contextPath  // Add the context path if available
             })
         });
 

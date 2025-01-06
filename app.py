@@ -523,6 +523,7 @@ def process_prompt():
         workspace_dir = data.get('workspace_dir')
         model_id = data.get('model_id', 'deepseek')
         attachments = data.get('attachments', [])
+        context_path = data.get('context_path')  # Get the context path
         
         if not prompt:
             return jsonify({'status': 'error', 'message': 'No prompt provided'}), 400
@@ -533,9 +534,33 @@ def process_prompt():
         elif not os.path.exists(workspace_dir):
             return jsonify({'status': 'error', 'message': 'Invalid workspace directory'}), 400
         
-        # Use workspace manager to get relevant files based on the query
+        # Use workspace manager to get relevant files based on the query and context
         socketio.emit('status', {'message': 'Reading workspace files...', 'step': 1})
-        files_content = workspace_manager.get_workspace_files(workspace_dir, query=prompt)
+        
+        # If we have a context path, prioritize that file/folder
+        if context_path:
+            full_path = os.path.join(workspace_dir, context_path)
+            if os.path.exists(full_path):
+                if os.path.isfile(full_path):
+                    # For a file, get its content directly
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        files_content = {context_path: f.read()}
+                else:
+                    # For a directory, get contents of files within it
+                    files_content = {}
+                    for root, _, files in os.walk(full_path):
+                        for file in files:
+                            if not file.startswith('.') and not file.endswith(tuple(workspace_manager.SKIP_EXTENSIONS)):
+                                file_path = os.path.join(root, file)
+                                rel_path = os.path.relpath(file_path, workspace_dir)
+                                try:
+                                    with open(file_path, 'r', encoding='utf-8') as f:
+                                        files_content[rel_path] = f.read()
+                                except Exception as e:
+                                    print(f"Error reading file {file_path}: {e}")
+        else:
+            # No context path, get relevant files based on the query
+            files_content = workspace_manager.get_workspace_files(workspace_dir, query=prompt)
         
         # Add attachment contents to files_content
         if attachments:
@@ -550,7 +575,7 @@ def process_prompt():
                 'status': 'error',
                 'message': 'No valid suggestions received'
             }), 400
-        
+
         # Process operations to add diffs
         suggestions['operations'] = workspace_manager.process_operations(suggestions['operations'], workspace_dir)
         
@@ -751,6 +776,7 @@ def chat():
         workspace_dir = data.get('workspace_dir')
         model_id = data.get('model_id', 'deepseek')
         attachments = data.get('attachments', [])
+        context_path = data.get('context_path')  # Get the context path
         
         if not prompt:
             return jsonify({'error': 'No prompt provided'}), 400
@@ -758,8 +784,30 @@ def chat():
         if not workspace_dir or not os.path.exists(workspace_dir):
             return jsonify({'error': 'Invalid workspace directory'}), 400
         
-        # Use workspace manager to get relevant files based on the query
-        files_content = workspace_manager.get_workspace_files(workspace_dir, query=prompt)
+        # If we have a context path, prioritize that file/folder
+        if context_path:
+            full_path = os.path.join(workspace_dir, context_path)
+            if os.path.exists(full_path):
+                if os.path.isfile(full_path):
+                    # For a file, get its content directly
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        files_content = {context_path: f.read()}
+                else:
+                    # For a directory, get contents of files within it
+                    files_content = {}
+                    for root, _, files in os.walk(full_path):
+                        for file in files:
+                            if not file.startswith('.') and not file.endswith(tuple(workspace_manager.SKIP_EXTENSIONS)):
+                                file_path = os.path.join(root, file)
+                                rel_path = os.path.relpath(file_path, workspace_dir)
+                                try:
+                                    with open(file_path, 'r', encoding='utf-8') as f:
+                                        files_content[rel_path] = f.read()
+                                except Exception as e:
+                                    print(f"Error reading file {file_path}: {e}")
+        else:
+            # No context path, get relevant files based on the query
+            files_content = workspace_manager.get_workspace_files(workspace_dir, query=prompt)
         
         # Add attachment contents to the context
         if attachments:
@@ -771,7 +819,19 @@ def chat():
         for file_path, content in files_content.items():
             context += f"File: {file_path}\nContent:\n{content}\n\n"
         
-        system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss the code in the workspace.
+        # Construct a more focused system message based on context
+        if context_path:
+            if os.path.isfile(os.path.join(workspace_dir, context_path)):
+                context_type = "file"
+            else:
+                context_type = "folder"
+            system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss code.
+You are currently analyzing this specific {context_type}: {context_path}
+{context}
+
+Please provide helpful responses focused on this {context_type} and its contents."""
+        else:
+            system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss the code in the workspace.
 {context}
 
 Please provide helpful responses about the code and files in this workspace."""
@@ -802,6 +862,42 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         print(f"Model: {model_id}")
         print(f"System message length: {len(system_message)} characters")
         print(f"User message length: {len(user_message)} characters")
+        
+        # Extract and log information about files in context
+        files_info = []
+        current_file = None
+        for line in system_message.split('\n'):
+            if line.startswith('File: '):
+                current_file = line[6:].strip()
+            elif current_file and line.startswith('Content:'):
+                content_lines = 0
+                content_size = 0
+                # Count lines and size until next file or end
+                for content_line in system_message[system_message.find(line):].split('\n'):
+                    if content_line.startswith('File: '):
+                        break
+                    content_lines += 1
+                    content_size += len(content_line)
+                files_info.append({
+                    'path': current_file,
+                    'lines': content_lines - 1,  # Subtract the 'Content:' line
+                    'size': content_size
+                })
+        
+        # Emit detailed status about context files
+        if files_info:
+            file_details = '\n'.join(f"- {f['path']} ({f['lines']} lines, {f['size']} bytes)" for f in files_info)
+            print(f"\nContext files:\n{file_details}")
+            socketio.emit('status', {
+                'message': f'Using {len(files_info)} files as context...',
+                'step': 1,
+                'details': {
+                    'files': files_info,
+                    'total_files': len(files_info),
+                    'total_lines': sum(f['lines'] for f in files_info),
+                    'total_size': sum(f['size'] for f in files_info)
+                }
+            })
         
         socketio.emit('status', {'message': 'Sending chat request to AI model...', 'step': 1})
         
@@ -904,8 +1000,9 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         return formatted_text
         
     except Exception as e:
-        print(f"\nError getting chat response: {e}")
-        raise Exception(f"Failed to get response from {model_config['name']}: {str(e)}")
+        socketio.emit('status', {'message': f'Error: {str(e)}', 'step': -1})
+        print(f"\nError getting chat response: {str(e)}")
+        raise
 
 @app.route('/models', methods=['GET'])
 def get_available_models():
@@ -1152,10 +1249,35 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
         print("\n=== Step 1: Preparing AI Request ===")
         print(f"Model: {model_id}")
         print(f"Prompt length: {len(prompt)} characters")
+        
+        # Extract and log information about files in context
+        files_info = []
         if files_content:
-            print(f"Files included: {len(files_content)} files")
+            for file_path, content in files_content.items():
+                lines = content.count('\n') + 1
+                size = len(content.encode('utf-8'))  # Get size in bytes
+                files_info.append({
+                    'path': file_path,
+                    'lines': lines,
+                    'size': size
+                })
+            
+            # Log and emit detailed status about context files
+            file_details = '\n'.join(f"- {f['path']} ({f['lines']} lines, {f['size']} bytes)" for f in files_info)
+            print(f"\nContext files:\n{file_details}")
+            socketio.emit('status', {
+                'message': f'Using {len(files_info)} files as context...',
+                'step': 1,
+                'details': {
+                    'files': files_info,
+                    'total_files': len(files_info),
+                    'total_lines': sum(f['lines'] for f in files_info),
+                    'total_size': sum(f['size'] for f in files_info)
+                }
+            })
+        
         if workspace_context:
-            print(f"Workspace context length: {len(workspace_context)} characters")
+            print(f"\nWorkspace context length: {len(workspace_context)} characters")
         
         socketio.emit('status', {'message': 'Sending request to AI model...', 'step': 1})
         
@@ -1172,8 +1294,10 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
         
         # Add files content if provided
         if files_content:
-            print("\nAdding files content...")
-            messages.append({"role": "system", "content": f"Files content:\n{files_content}"})
+            files_content_str = "Files content:\n"
+            for path, content in files_content.items():
+                files_content_str += f"\nFile: {path}\nContent:\n{content}\n"
+            messages.append({"role": "system", "content": files_content_str})
         
         # Add the user's prompt
         messages.append({"role": "user", "content": prompt})
