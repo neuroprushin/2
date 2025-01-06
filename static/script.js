@@ -56,11 +56,37 @@ function updateStatus(message, step) {
     } else {
         statusElement.classList.remove('error');
     }
+    
+    // Get the container element
+    const container = document.getElementById('statusContainer');
+    
+    // Clear any existing timeout
+    if (container._timeoutId) {
+        clearTimeout(container._timeoutId);
+    }
+    
+    // Set new timeout to remove the status after 10 seconds
+    container._timeoutId = setTimeout(() => {
+        container.remove();
+    }, 10000);
 }
 
 function updateProgress(message, tokens) {
     const progressElement = document.getElementById('progressMessage') || createProgressElement();
     progressElement.textContent = message;
+    
+    // Get the container element
+    const container = document.getElementById('progressContainer');
+    
+    // Clear any existing timeout
+    if (container._timeoutId) {
+        clearTimeout(container._timeoutId);
+    }
+    
+    // Set new timeout to remove the progress after 10 seconds
+    container._timeoutId = setTimeout(() => {
+        container.remove();
+    }, 10000);
 }
 
 function updateConnectionStatus(connected) {
@@ -1412,10 +1438,12 @@ function showError(message, type = 'error') {
     // Add to document
     document.body.appendChild(notification);
 
-    // Remove after 3 seconds
+    // Remove after 10 seconds (instead of 3)
     setTimeout(() => {
-        notification.remove();
-    }, 3000);
+        if (notification && notification.parentNode) {
+            notification.remove();
+        }
+    }, 10000);
 }
 
 function validateWorkspace() {
