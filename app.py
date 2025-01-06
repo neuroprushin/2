@@ -575,8 +575,13 @@ async def process_prompt():
             for attachment in attachments:
                 files_content[f"[ATTACHMENT] {attachment['name']}"] = attachment['content']
         
-        # Split files into chunks that respect token limits
-        chunks = workspace_manager.chunk_workspace_files(files_content, system_prompt=system_prompt)
+        # If no files found, create a single empty chunk
+        chunks = []
+        if not files_content:
+            chunks = [{}]  # Single empty chunk
+        else:
+            # Split files into chunks that respect token limits
+            chunks = workspace_manager.chunk_workspace_files(files_content, system_prompt=system_prompt)
         
         # Process chunks in parallel
         socketio.emit('status', {'message': 'Processing files in parallel...', 'step': 2})

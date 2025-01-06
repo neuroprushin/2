@@ -800,7 +800,7 @@ class WorkspaceManager:
         from app import model_clients, AVAILABLE_MODELS, system_prompt, socketio
         import json
         import time
-        
+
         async def process_chunk(chunk, chunk_index):
             # Process each chunk in a separate thread
             with ThreadPoolExecutor() as executor:
@@ -812,44 +812,20 @@ class WorkspaceManager:
                     print(f"Model: {model_id}")
                     print(f"Prompt length: {len(prompt)} characters")
                     
-                    # Extract and log information about files in chunk
-                    files_info = []
-                    for file_path, content in chunk.items():
-                        lines = content.count('\n') + 1
-                        size = len(content.encode('utf-8'))
-                        files_info.append({
-                            'path': file_path,
-                            'lines': lines,
-                            'size': size
-                        })
-                    
-                    # Log and emit detailed status about chunk files
-                    file_details = '\n'.join(f"- {f['path']} ({f['lines']} lines, {f['size']} bytes)" for f in files_info)
-                    print(f"\nFiles in chunk {chunk_index + 1}:\n{file_details}")
-                    socketio.emit('status', {
-                        'message': f'Processing chunk {chunk_index + 1}/{len(chunks)} ({len(files_info)} files)...',
-                        'step': 1,
-                        'details': {
-                            'chunk': chunk_index + 1,
-                            'total_chunks': len(chunks),
-                            'files': files_info,
-                            'total_files': len(files_info),
-                            'total_lines': sum(f['lines'] for f in files_info),
-                            'total_size': sum(f['size'] for f in files_info)
-                        }
-                    })
-                    
                     # Build context from chunk files
-                    context = "Here are the relevant files in the workspace:\n\n"
-                    for file_path, content in chunk.items():
-                        context += f"File: {file_path}\nContent:\n{content}\n\n"
+                    context = ""
+                    if chunk:  # Only add file context if there are files
+                        context = "Here are the relevant files in the workspace:\n\n"
+                        for file_path, content in chunk.items():
+                            context += f"File: {file_path}\nContent:\n{content}\n\n"
                     
                     # Create messages array
                     messages = [
                         {"role": "system", "content": system_prompt},
-                        {"role": "system", "content": f"Workspace context:\n{context}"},
-                        {"role": "user", "content": prompt}
                     ]
+                    if context:
+                        messages.append({"role": "system", "content": f"Workspace context:\n{context}"})
+                    messages.append({"role": "user", "content": prompt})
                     
                     print(f"\n=== Step 2: Sending Request for Chunk {chunk_index + 1} ===")
                     socketio.emit('status', {
@@ -867,7 +843,9 @@ class WorkspaceManager:
                     if model_id == 'claude':
                         print("Sending request to Claude model...")
                         # Claude uses a different message format
-                        system_content = f"{system_prompt}\n\nWorkspace context:\n{context}"
+                        system_content = f"{system_prompt}"
+                        if context:
+                            system_content += f"\n\nWorkspace context:\n{context}"
                         try:
                             response = client.messages.create(
                                 model=model_config['models']['code'],
