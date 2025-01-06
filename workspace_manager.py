@@ -800,6 +800,7 @@ class WorkspaceManager:
         from app import model_clients, AVAILABLE_MODELS, system_prompt, socketio
         import json
         import time
+        import os
 
         async def process_chunk(chunk, chunk_index):
             # Process each chunk in a separate thread
@@ -817,11 +818,13 @@ class WorkspaceManager:
                     if chunk:  # Only add file context if there are files
                         context = "Here are the relevant files in the workspace:\n\n"
                         for file_path, content in chunk.items():
-                            context += f"File: {file_path}\nContent:\n{content}\n\n"
+                            # Normalize path separators for Windows
+                            normalized_path = file_path.replace('\\', '/')
+                            context += f"File: {normalized_path}\nContent:\n{content}\n\n"
                     
-                    # Create messages array
+                    # Create messages array with normalized system prompt
                     messages = [
-                        {"role": "system", "content": system_prompt},
+                        {"role": "system", "content": system_prompt.replace('\\', '/')},
                     ]
                     if context:
                         messages.append({"role": "system", "content": f"Workspace context:\n{context}"})
@@ -843,7 +846,7 @@ class WorkspaceManager:
                     if model_id == 'claude':
                         print("Sending request to Claude model...")
                         # Claude uses a different message format
-                        system_content = f"{system_prompt}"
+                        system_content = system_prompt.replace('\\', '/')
                         if context:
                             system_content += f"\n\nWorkspace context:\n{context}"
                         try:
@@ -946,6 +949,12 @@ class WorkspaceManager:
                     try:
                         result = json.loads(cleaned_text)
                         if isinstance(result, dict) and 'operations' in result:
+                            # Normalize paths in operations
+                            for operation in result['operations']:
+                                if 'path' in operation:
+                                    operation['path'] = operation['path'].replace('\\', '/')
+                                if 'new_path' in operation:
+                                    operation['new_path'] = operation['new_path'].replace('\\', '/')
                             print(f"Successfully parsed response with {len(result['operations'])} operations")
                             return result
                     except json.JSONDecodeError:
@@ -957,6 +966,12 @@ class WorkspaceManager:
                                 json_text = cleaned_text[start:end+1]
                                 result = json.loads(json_text)
                                 if isinstance(result, dict) and 'operations' in result:
+                                    # Normalize paths in operations
+                                    for operation in result['operations']:
+                                        if 'path' in operation:
+                                            operation['path'] = operation['path'].replace('\\', '/')
+                                        if 'new_path' in operation:
+                                            operation['new_path'] = operation['new_path'].replace('\\', '/')
                                     print(f"Successfully extracted and parsed JSON with {len(result['operations'])} operations")
                                     return result
                         except:
@@ -1005,18 +1020,47 @@ class WorkspaceManager:
             'operations': []
         }
         
-        seen_paths = set()
+        # Group operations by file path
+        operations_by_path = {}
         
         for suggestions in suggestions_list:
             if not suggestions or 'operations' not in suggestions:
                 continue
                 
             for operation in suggestions['operations']:
-                # Skip duplicate operations on the same file
-                if operation['path'] in seen_paths:
-                    continue
+                # Normalize path for Windows
+                path = operation['path'].replace('\\', '/')
+                if path not in operations_by_path:
+                    operations_by_path[path] = []
+                operations_by_path[path].append(operation)
+        
+        # Process each file's operations
+        for path, ops in operations_by_path.items():
+            if len(ops) == 1:
+                # If only one operation, use it directly
+                merged['operations'].append(ops[0])
+            else:
+                # For multiple operations on the same file
+                op_type = ops[0]['type']  # Use the type of the first operation
+                
+                if op_type == 'edit_file':
+                    # Combine all changes into a single edit operation
+                    combined_changes = []
+                    for op in ops:
+                        if 'changes' in op:
+                            combined_changes.extend(op['changes'])
                     
-                merged['operations'].append(operation)
-                seen_paths.add(operation['path'])
+                    merged['operations'].append({
+                        'type': 'edit_file',
+                        'path': path,  # Use normalized path
+                        'changes': combined_changes,
+                        'explanation': 'Combined multiple edit operations'
+                    })
+                elif op_type == 'create_file':
+                    # For create operations, use the last one
+                    merged['operations'].append(ops[-1])
+                elif op_type == 'remove_file':
+                    # For remove operations, use the last one
+                    merged['operations'].append(ops[-1])
         
         return merged 
