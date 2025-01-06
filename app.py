@@ -567,8 +567,30 @@ def process_prompt():
             for attachment in attachments:
                 files_content[f"[ATTACHMENT] {attachment['name']}"] = attachment['content']
         
+        # Build context from files
+        context = "Here are the relevant files in the workspace:\n\n"
+        for file_path, content in files_content.items():
+            context += f"File: {file_path}\nContent:\n{content}\n\n"
+        
+        # Construct a more focused system message based on context
+        if context_path:
+            if os.path.isfile(os.path.join(workspace_dir, context_path)):
+                context_type = "file"
+            else:
+                context_type = "folder"
+            system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss code.
+You are currently analyzing this specific {context_type}: {context_path}
+{context}
+
+Please provide helpful responses focused on this {context_type} and its contents."""
+        else:
+            system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss the code in the workspace.
+{context}
+
+Please provide helpful responses about the code and files in this workspace."""
+        
         # Get suggestions from AI
-        suggestions = get_code_suggestion(prompt, files_content, model_id=model_id)
+        suggestions = get_code_suggestion(prompt, files_content, system_message=system_message, model_id=model_id)
         
         if not suggestions or 'operations' not in suggestions:
             return jsonify({
@@ -1236,7 +1258,7 @@ def apply_changes(suggestions, workspace_dir):
     except Exception as e:
         raise Exception(f"Failed to apply changes: {str(e)}")
 
-def get_code_suggestion(prompt, files_content=None, workspace_context=None, model_id='deepseek'):
+def get_code_suggestion(prompt, files_content=None, system_message=None, model_id='deepseek'):
     """Get code suggestions from the selected AI model"""
     if model_id not in model_clients:
         raise Exception(f"Model {model_id} is not configured. Please check your API keys.")
@@ -1275,8 +1297,8 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
                 }
             })
         
-        if workspace_context:
-            print(f"\nWorkspace context length: {len(workspace_context)} characters")
+        if system_message:
+            print(f"\nSystem message length: {len(system_message)} characters")
         
         socketio.emit('status', {'message': 'Sending request to AI model...', 'step': 1})
         
@@ -1287,9 +1309,9 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
         messages.append({"role": "system", "content": system_prompt})
         
         # Add workspace context if provided
-        if workspace_context:
+        if system_message:
             print("\nAdding workspace context...")
-            messages.append({"role": "system", "content": f"Workspace context:\n{workspace_context}"})
+            messages.append({"role": "system", "content": f"Workspace context:\n{system_message}"})
         
         # Add files content if provided
         if files_content:
@@ -1315,9 +1337,9 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
                 temperature=0.7,
                 max_tokens=2048
             )
-            full_text = response.content[0].text
+            text = response.content[0].text
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
-            print(f"Response length: {len(full_text)} characters")
+            print(f"Response length: {len(text)} characters")
         else:
             # Use OpenAI's client interface with streaming
             response = client.chat.completions.create(
