@@ -2008,27 +2008,12 @@ async function selectFolderToImport(folder) {
             throw new Error(data.error || 'Failed to import folder');
         }
         
-        // First update workspace info
+        // Update current workspace
         currentWorkspace = data.workspace_dir;
         
-        // Then update the workspace history to ensure all elements are created
+        // Update workspace history and select the workspace
         await loadWorkspaceHistory();
-        
-        // Now update the current workspace info and tree
-        const workspaceInfo = document.getElementById('currentWorkspaceInfo');
-        if (workspaceInfo) {
-            workspaceInfo.classList.remove('hidden');
-        }
-        
-        const workspaceName = document.getElementById('currentWorkspaceName');
-        if (workspaceName) {
-            workspaceName.textContent = data.workspace_id;
-        }
-        
-        const workspaceTree = document.getElementById('workspaceTree');
-        if (workspaceTree) {
-            updateWorkspaceTree(data.structure);
-        }
+        await selectWorkspace(data.workspace_dir);
         
         showError('Folder imported successfully', 'success');
     } catch (error) {

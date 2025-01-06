@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 import difflib
+import time
 
 import eventlet
 eventlet.monkey_patch()
@@ -27,8 +28,18 @@ AVAILABLE_MODELS = {
         'client_class': OpenAI,
         'base_url': 'https://api.deepseek.com',
         'models': {
-            'code': 'deepseek-coder',
+            'code': 'deepseek-chat',
             'chat': 'deepseek-chat'
+        }
+    },
+    'deepseek-openrouter': {
+        'name': 'DeepSeek V3 (OpenRouter)',
+        'api_key_env': 'OPENROUTER_API_KEY',
+        'client_class': OpenAI,
+        'base_url': 'https://openrouter.ai/api/v1',
+        'models': {
+            'code': 'deepseek/deepseek-chat',
+            'chat': 'deepseek/deepseek-chat'
         }
     },
     'grok': {
@@ -428,7 +439,7 @@ def get_history():
         }), 500
 
 @app.route('/workspace/structure', methods=['POST'])
-def get_workspace_structure():
+def get_workspace_structure_route():
     try:
         data = request.get_json()
         workspace_dir = data.get('workspace_dir')
@@ -787,7 +798,18 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
     model_config = AVAILABLE_MODELS[model_id]
     
     try:
+        print("\n=== Step 1: Preparing Chat Request ===")
+        print(f"Model: {model_id}")
+        print(f"System message length: {len(system_message)} characters")
+        print(f"User message length: {len(user_message)} characters")
+        
+        socketio.emit('status', {'message': 'Sending chat request to AI model...', 'step': 1})
+        
+        start_time = time.time()
+        print("\n=== Step 2: Sending Request to AI Model ===")
+        
         if model_id == 'claude':
+            # Use Anthropic's client interface
             response = client.messages.create(
                 model=model_config['models']['chat'],
                 system=system_message,
@@ -799,19 +821,63 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                 max_tokens=2048
             )
             text = response.content[0].text
+            print(f"\nResponse received in {time.time() - start_time:.1f}s")
+            print(f"Response length: {len(text)} characters")
         else:
+            # Use OpenAI's client interface
             messages = [
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_message}
             ]
             
+            # Use streaming for better progress tracking
             response = client.chat.completions.create(
                 model=model_config['models']['chat'],
                 messages=messages,
                 temperature=0.7,
+                stream=True
             )
-            text = response.choices[0].message.content
+            
+            print("Request sent, waiting for response...")
+            socketio.emit('status', {'message': 'Receiving AI response...', 'step': 2})
+            
+            # Process the streamed response
+            text = ""
+            chunk_count = 0
+            last_update = time.time()
+            update_interval = 0.5  # Update status every 0.5 seconds
+            
+            for chunk in response:
+                if chunk and hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
+                    content = chunk.choices[0].delta.content
+                    if content is not None:  # Add null check
+                        text += content
+                        chunk_count += 1
+                    
+                    # Update status periodically
+                    current_time = time.time()
+                    if current_time - last_update >= update_interval:
+                        elapsed = current_time - start_time
+                        tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
+                        print(f"\rReceived {chunk_count} chunks ({len(text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
+                        socketio.emit('status', {
+                            'message': f'Receiving chat response... ({len(text)} characters)',
+                            'step': 2,
+                            'progress': {
+                                'chunks': chunk_count,
+                                'chars': len(text),
+                                'elapsed': elapsed,
+                                'rate': tokens_per_second
+                            }
+                        })
+                        last_update = current_time
+            
+            print(f"\nResponse complete in {time.time() - start_time:.1f}s")
+            print(f"Total response size: {len(text)} characters in {chunk_count} chunks")
 
+        print("\n=== Step 3: Formatting Response ===")
+        socketio.emit('status', {'message': 'Formatting response...', 'step': 3})
+        
         # Split text into code blocks and regular text
         parts = text.split('```')
         formatted_parts = []
@@ -831,11 +897,15 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                     # Single line code block
                     formatted_parts.append(f'<pre><code>{part.replace(" ", "&nbsp;")}</code></pre>')
         
-        return ''.join(formatted_parts)
+        formatted_text = ''.join(formatted_parts)
+        print("Response formatting complete")
+        
+        socketio.emit('status', {'message': 'Response ready', 'step': 4})
+        return formatted_text
         
     except Exception as e:
-        print(f"Error getting chat response: {e}")
-        raise Exception(f"Failed to get response from {model_config['name']}")
+        print(f"\nError getting chat response: {e}")
+        raise Exception(f"Failed to get response from {model_config['name']}: {str(e)}")
 
 @app.route('/models', methods=['GET'])
 def get_available_models():
@@ -1079,116 +1149,114 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
     model_config = AVAILABLE_MODELS[model_id]
     
     try:
-        socketio.emit('status', {'message': 'Analyzing files...', 'step': 1})
-        print("\n=== Step 1: Analyzing files ===")
+        print("\n=== Step 1: Preparing AI Request ===")
+        print(f"Model: {model_id}")
+        print(f"Prompt length: {len(prompt)} characters")
+        if files_content:
+            print(f"Files included: {len(files_content)} files")
+        if workspace_context:
+            print(f"Workspace context length: {len(workspace_context)} characters")
         
-        # Build analysis prompt
-        workspace_files = []
-        attachment_files = []
+        socketio.emit('status', {'message': 'Sending request to AI model...', 'step': 1})
         
-        for file_path, content in files_content.items():
-            if file_path.startswith('[ATTACHMENT]'):
-                attachment_files.append(f"File: {file_path}\nContent:\n{content}\n")
-            else:
-                workspace_files.append(f"File: {file_path}\nContent:\n{content}\n")
+        # Create the messages array for the chat
+        messages = []
         
-        # Construct the analysis prompt with clear sections
-        analysis_prompt = f"""Based on this request: {prompt}
-
-Here are the current files in the workspace:
-
-{chr(10).join(workspace_files)}"""
-
-        if attachment_files:
-            analysis_prompt += f"""
-
-Here are the attached reference files:
-
-{chr(10).join(attachment_files)}"""
-
-        analysis_prompt += """
-
-Please analyze these files and determine:
-1. Which files need to be modified
-2. What specific changes are needed in each file
-3. Whether any new files need to be created
-4. Whether any files need to be deleted
-
-Use the attached files (if any) as reference for:
-- Code patterns and style
-- Implementation examples
-- Configuration formats
-- Similar functionality
-
-Return a JSON object with the operations needed. Only include files that actually need changes.
-Do not include files in the operations if they don't need modifications.
-
-The response MUST be a valid JSON object with this exact structure:
-{
-    "explanation": "Brief explanation of what you will do",
-    "operations": [
-        {
-            "type": "edit_file",
-            "path": "relative/path",
-            "changes": [
-                {
-                    "old": "text to replace",
-                    "new": "replacement text"
-                }
-            ],
-            "explanation": "why this change is needed"
-        }
-    ]
-}
-
-IMPORTANT: 
-1. Return ONLY the JSON object, with no additional text or code blocks
-2. Ensure all content fields are complete and not truncated
-3. For create_file operations, include the complete file content
-4. For edit_file operations, ensure both 'old' and 'new' fields are complete
-5. Do not truncate any content in the middle of a line or field
-6. Complete all strings and fields - do not leave any content incomplete
-7. If a field would be too long, break it into multiple smaller changes instead
-8. Do not use ellipsis (...) or backslashes (\\) at the end of content
-9. Each change should be a complete, self-contained unit"""
-
-        socketio.emit('status', {'message': 'Sending request to AI...', 'step': 2})
-        print("\nSending analysis request...")
+        # Add system prompt
+        messages.append({"role": "system", "content": system_prompt})
+        
+        # Add workspace context if provided
+        if workspace_context:
+            print("\nAdding workspace context...")
+            messages.append({"role": "system", "content": f"Workspace context:\n{workspace_context}"})
+        
+        # Add files content if provided
+        if files_content:
+            print("\nAdding files content...")
+            messages.append({"role": "system", "content": f"Files content:\n{files_content}"})
+        
+        # Add the user's prompt
+        messages.append({"role": "user", "content": prompt})
+        
+        print("\n=== Step 2: Sending Request to AI Model ===")
+        start_time = time.time()
         
         if model_id == 'claude':
+            # Use Anthropic's client interface
             response = client.messages.create(
                 model=model_config['models']['code'],
                 system=system_prompt,
-                messages=[{"role": "user", "content": analysis_prompt}],
-                temperature=0.7,
-                max_tokens=8192  # Maximum allowed tokens
+                messages=[{
+                    "role": "user",
+                    "content": prompt
+                }],
+                temperature=0.1,
+                max_tokens=4096
             )
-            # Claude doesn't need streaming for this use case
             full_text = response.content[0].text
+            print(f"\nResponse received in {time.time() - start_time:.1f}s")
+            print(f"Response length: {len(full_text)} characters")
         else:
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": analysis_prompt}
-            ]
-            
-            # Use non-streaming mode for better reliability
+            # Use OpenAI's client interface with streaming
             response = client.chat.completions.create(
                 model=model_config['models']['code'],
                 messages=messages,
-                temperature=0.7,
-                max_tokens=8192,  # Maximum allowed tokens
-                stream=False  # Disable streaming for complete responses
+                temperature=0.1,
+                stream=True
             )
             
-            full_text = response.choices[0].message.content
+            print("Request sent, waiting for response...")
+            socketio.emit('status', {'message': 'Receiving AI response...', 'step': 2})
+            
+            # Process the streamed response
+            full_text = ""
+            chunk_count = 0
+            last_update = time.time()
+            update_interval = 0.5  # Update status every 0.5 seconds
+            
+            for chunk in response:
+                if chunk and hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
+                    content = chunk.choices[0].delta.content
+                    if content is not None:  # Add null check
+                        full_text += content
+                        chunk_count += 1
+                    else:
+                        print("\rReceived empty content chunk", end="")
+                    
+                    # Update status periodically
+                    current_time = time.time()
+                    if current_time - last_update >= update_interval:
+                        elapsed = current_time - start_time
+                        tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
+                        print(f"\rReceived {chunk_count} chunks ({len(full_text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
+                        socketio.emit('status', {
+                            'message': f'Receiving response... ({len(full_text)} characters)',
+                            'step': 2,
+                            'progress': {
+                                'chunks': chunk_count,
+                                'chars': len(full_text),
+                                'elapsed': elapsed,
+                                'rate': tokens_per_second
+                            }
+                        })
+                        last_update = current_time
+            
+            print(f"\nResponse complete in {time.time() - start_time:.1f}s")
+            print(f"Total response size: {len(full_text)} characters in {chunk_count} chunks")
 
-        socketio.emit('status', {'message': 'Processing AI response...', 'step': 3})
-        print("\n=== Step 2: Processing response ===")
-        print("\nFull response length:", len(full_text))
-        print("\nFirst 500 chars:", full_text[:500])
-        
         # Clean up the response text
         cleaned_text = full_text.strip()
+        
+        # Define truncation markers that indicate incomplete content
+        truncation_markers = [
+            '..."',  # Truncated string
+            '...\n',  # Truncated line
+            '...\r',  # Truncated line (Windows)
+            '...[',   # Truncated array
+            '...{',   # Truncated object
+            '...}',   # Truncated closing brace
+            '...]'    # Truncated closing bracket
+        ]
         
         # Remove any markdown code block markers more carefully
         if cleaned_text.startswith('```'):
@@ -1202,7 +1270,17 @@ IMPORTANT:
                 cleaned_text = cleaned_text[:-3].strip()
         
         # Check for obvious truncation
-        if '...' in cleaned_text or cleaned_text.rstrip().endswith('\\'):
+        is_truncated = False
+        for marker in truncation_markers:
+            if marker in cleaned_text:
+                is_truncated = True
+                break
+                
+        # Check for trailing backslash truncation
+        if cleaned_text.rstrip().endswith('\\'):
+            is_truncated = True
+            
+        if is_truncated:
             raise ValueError("Response appears to be truncated. Please try again with a smaller change set.")
         
         # Try to parse the cleaned response
@@ -1210,44 +1288,76 @@ IMPORTANT:
             result = json.loads(cleaned_text)
             if isinstance(result, dict) and 'operations' in result:
                 # Validate all operations
+                valid_operations = []
                 for op in result['operations']:
-                    # Validate path exists
-                    if 'path' not in op:
-                        raise ValueError("Operation missing path field")
-                        
-                    if op['type'] == 'create_file':
-                        # Validate content exists and is complete
-                        if 'content' not in op:
-                            raise ValueError(f"Create operation missing content field for {op['path']}")
-                        if not op['content'].strip():
-                            raise ValueError(f"Empty content for {op['path']}")
-                        # Check for incomplete content
-                        if '...' in op['content'] or op['content'].rstrip().endswith('\\'):
-                            raise ValueError(f"Content appears to be truncated in {op['path']}")
+                    try:
+                        # Validate path exists
+                        if 'path' not in op:
+                            print(f"Skipping operation: missing path field")
+                            continue
                             
-                    elif op['type'] == 'edit_file':
-                        if 'changes' not in op:
-                            raise ValueError(f"Edit operation missing changes array for {op['path']}")
-                        for i, change in enumerate(op['changes']):
-                            # Validate both fields exist
-                            if 'old' not in change or 'new' not in change:
-                                raise ValueError(f"Change {i} missing old/new fields in {op['path']}")
-                            # Validate fields are complete
-                            if not change['old'].strip() or not change['new'].strip():
-                                raise ValueError(f"Empty old/new fields in change {i} of {op['path']}")
+                        if op['type'] == 'create_file':
+                            # Validate content exists and is complete
+                            if 'content' not in op or not op['content'].strip():
+                                print(f"Skipping create operation: missing or empty content for {op['path']}")
+                                continue
                             # Check for incomplete content
-                            if '...' in change['old'] or '...' in change['new']:
-                                raise ValueError(f"Content appears to be truncated in change {i} of {op['path']}")
-                            if change['old'].rstrip().endswith('\\') or change['new'].rstrip().endswith('\\'):
-                                raise ValueError(f"Content appears to be truncated in change {i} of {op['path']}")
-                    # Validate explanation exists
-                    if 'explanation' not in op:
-                        raise ValueError(f"Operation missing explanation field for {op['path']}")
-                    # Validate explanation is complete
-                    if not op['explanation'].strip():
-                        raise ValueError(f"Empty explanation field for {op['path']}")
-                    if '...' in op['explanation'] or op['explanation'].rstrip().endswith('\\'):
-                        raise ValueError(f"Explanation appears to be truncated for {op['path']}")
+                            if '...' in op['content'] or op['content'].rstrip().endswith('\\'):
+                                print(f"Skipping create operation: truncated content in {op['path']}")
+                                continue
+                                
+                        elif op['type'] == 'edit_file':
+                            if 'changes' not in op:
+                                print(f"Skipping edit operation: missing changes array for {op['path']}")
+                                continue
+                            
+                            # Filter out incomplete changes
+                            valid_changes = []
+                            for i, change in enumerate(op['changes']):
+                                try:
+                                    # Validate both fields exist and are complete
+                                    if not all(key in change for key in ['old', 'new']):
+                                        print(f"Skipping change {i}: missing old/new fields in {op['path']}")
+                                        continue
+                                        
+                                    # Check if either field is incomplete
+                                    old_text = change.get('old', '').strip()
+                                    new_text = change.get('new', '').strip()
+                                    
+                                    if not old_text or not new_text:
+                                        print(f"Skipping change {i}: empty old/new content in {op['path']}")
+                                        continue
+                                        
+                                    # Check for truncation in either field
+                                    if any(marker in old_text or marker in new_text for marker in truncation_markers):
+                                        print(f"Skipping change {i}: truncated content in {op['path']}")
+                                        continue
+                                        
+                                    valid_changes.append(change)
+                                except Exception as e:
+                                    print(f"Error processing change {i} in {op['path']}: {str(e)}")
+                                    continue
+                            
+                            if not valid_changes:
+                                print(f"Skipping operation: no valid changes for {op['path']}")
+                                continue
+                                
+                            op['changes'] = valid_changes
+                            
+                        # Validate explanation exists and is complete
+                        if 'explanation' not in op or not op['explanation'].strip():
+                            print(f"Skipping operation: missing or empty explanation for {op['path']}")
+                            continue
+                            
+                        valid_operations.append(op)
+                    except Exception as e:
+                        print(f"Error processing operation for {op.get('path', 'unknown')}: {str(e)}")
+                        continue
+                
+                if not valid_operations:
+                    raise ValueError("No valid operations found in the response. Please try again with a simpler request.")
+                    
+                result['operations'] = valid_operations
                 return result
         except json.JSONDecodeError as e:
             print(f"JSON decode error: {str(e)}")  # Debug log
@@ -1437,6 +1547,20 @@ def rename_file():
             'status': 'error',
             'message': str(e)
         }), 500
+
+def init_model_clients():
+    """Initialize API clients for each configured model"""
+    from openai import OpenAI
+    from anthropic import Anthropic
+    
+    if os.getenv('OPENAI_API_KEY'):
+        openai_client = OpenAI()
+        model_clients['deepseek'] = openai_client
+        model_clients['gpt-4'] = openai_client
+        model_clients['gpt-3.5-turbo'] = openai_client
+    
+    if os.getenv('ANTHROPIC_API_KEY'):
+        model_clients['claude'] = Anthropic()  # Use actual Anthropic client
 
 if __name__ == '__main__':
     # Watch static and template directories for changes
