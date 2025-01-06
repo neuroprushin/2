@@ -482,14 +482,15 @@ class WorkspaceManager:
                 if operation['type'] == 'edit_file':
                     changes = operation.get('changes', [])
                     for change in changes:
-                        if 'old' in change and 'new' in change:
-                            # Validate that both old and new fields are complete
-                            if not change['old'].strip() or not change['new'].strip():
-                                raise ValueError(f"Incomplete change detected in {operation.get('path', 'unknown file')}")
+                        if 'old' not in change or 'new' not in change:
+                            raise ValueError(f"Missing 'old' or 'new' in change for {operation.get('path', 'unknown file')}")
+                        # Allow empty strings in old/new as they might be valid (e.g., adding/removing lines)
+                        if change['old'] is None or change['new'] is None:
+                            raise ValueError(f"None value in change for {operation.get('path', 'unknown file')}")
                 elif operation['type'] == 'create_file':
-                    # Validate content field is complete
-                    if not operation.get('content', '').strip():
-                        raise ValueError(f"Empty or incomplete content for {operation.get('path', 'unknown file')}")
+                    # Validate content field exists and is not None
+                    if 'content' not in operation or operation['content'] is None:
+                        raise ValueError(f"Missing or None content for {operation.get('path', 'unknown file')}")
 
                 # After validation, clean the paths for processing
                 if 'path' in operation:
@@ -554,7 +555,7 @@ class WorkspaceManager:
                         # Non-Python files don't need linting
                         operation['lint_passed'] = True
                         operation['lint_output'] = ''
-                    
+                
                 elif operation['type'] == 'create_file':
                     # For new files, show the entire content as added
                     diff = [
@@ -590,7 +591,7 @@ class WorkspaceManager:
                         # Non-Python files don't need linting
                         operation['lint_passed'] = True
                         operation['lint_output'] = ''
-                    
+                
                 elif operation['type'] == 'remove_file':
                     # For file removal, show the entire content as removed
                     file_path = os.path.join(workspace_dir, operation['path'])
