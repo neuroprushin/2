@@ -890,12 +890,12 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                 # Extract language if specified
                 if '\n' in part:
                     lang, code = part.split('\n', 1)
-                    # Preserve indentation and line breaks in code
-                    formatted_code = code.replace('\n', '<br>').replace(' ', '&nbsp;')
+                    # Remove trailing whitespace and newlines, preserve indentation
+                    formatted_code = code.rstrip().replace('\n', '<br>').replace(' ', '&nbsp;')
                     formatted_parts.append(f'<pre><code class="language-{lang.strip()}">{formatted_code}</code></pre>')
                 else:
-                    # Single line code block
-                    formatted_parts.append(f'<pre><code>{part.replace(" ", "&nbsp;")}</code></pre>')
+                    # Single line code block, remove trailing whitespace
+                    formatted_parts.append(f'<pre><code>{part.strip().replace(" ", "&nbsp;")}</code></pre>')
         
         formatted_text = ''.join(formatted_parts)
         print("Response formatting complete")
