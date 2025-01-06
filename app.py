@@ -906,14 +906,22 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         
         if model_id == 'claude':
             # Use Anthropic's client interface
+            full_context = f"{system_prompt}\n\n"
+            if workspace_context:
+                full_context += f"Workspace context:\n{workspace_context}\n\n"
+            if files_content:
+                full_context += "Files content:\n"
+                for path, content in files_content.items():
+                    full_context += f"\nFile: {path}\nContent:\n{content}\n"
+            
             response = client.messages.create(
                 model=model_config['models']['code'],
                 messages=[{
                     "role": "user",
-                    "content": f"{system_message}\n\nUser: {user_message}"
+                    "content": f"{full_context}\n\nUser request: {prompt}\n\nPlease provide your response in valid JSON format following the structure specified in the system prompt."
                 }],
-                temperature=0.7,
-                max_tokens=2048
+                temperature=0.1,
+                max_tokens=4096
             )
             text = response.content[0].text
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
@@ -1306,14 +1314,22 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
         
         if model_id == 'claude':
             # Use Anthropic's client interface
+            full_context = f"{system_prompt}\n\n"
+            if workspace_context:
+                full_context += f"Workspace context:\n{workspace_context}\n\n"
+            if files_content:
+                full_context += "Files content:\n"
+                for path, content in files_content.items():
+                    full_context += f"\nFile: {path}\nContent:\n{content}\n"
+            
             response = client.messages.create(
                 model=model_config['models']['code'],
                 messages=[{
                     "role": "user",
-                    "content": f"{system_message}\n\nUser: {user_message}"
+                    "content": f"{full_context}\n\nUser request: {prompt}\n\nPlease provide your response in valid JSON format following the structure specified in the system prompt."
                 }],
-                temperature=0.7,
-                max_tokens=2048
+                temperature=0.1,
+                max_tokens=4096
             )
             full_text = response.content[0].text
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
@@ -1369,138 +1385,99 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
         # Clean up the response text
         cleaned_text = full_text.strip()
         
-        # Define truncation markers that indicate incomplete content
-        truncation_markers = [
-            '..."',  # Truncated string
-            '...\n',  # Truncated line
-            '...\r',  # Truncated line (Windows)
-            '...[',   # Truncated array
-            '...{',   # Truncated object
-            '...}',   # Truncated closing brace
-            '...]'    # Truncated closing bracket
-        ]
-        
-        # Remove any markdown code block markers more carefully
-        if cleaned_text.startswith('```'):
-            # Find the first newline after the opening ```
-            first_newline = cleaned_text.find('\n')
-            if first_newline != -1:
-                # Remove everything before the first newline (including ```json or just ```)
-                cleaned_text = cleaned_text[first_newline:].strip()
-            # Remove the closing ```
-            if cleaned_text.endswith('```'):
-                cleaned_text = cleaned_text[:-3].strip()
-        
-        # Check for obvious truncation
-        is_truncated = False
-        for marker in truncation_markers:
-            if marker in cleaned_text:
-                is_truncated = True
-                break
-                
-        # Check for trailing backslash truncation
-        if cleaned_text.rstrip().endswith('\\'):
-            is_truncated = True
+        # Try to extract JSON from the response if it's wrapped in markdown code blocks
+        if cleaned_text.startswith('```') and cleaned_text.endswith('```'):
+            # Remove the code block markers and any language identifier
+            cleaned_text = cleaned_text.split('\n', 1)[1] if '\n' in cleaned_text else cleaned_text
+            cleaned_text = cleaned_text.rsplit('\n', 1)[0] if '\n' in cleaned_text else cleaned_text
+            cleaned_text = cleaned_text.strip('`').strip()
             
-        if is_truncated:
-            raise ValueError("Response appears to be truncated. Please try again with a smaller change set.")
+        # Try to find JSON content within the response
+        json_start = cleaned_text.find('{')
+        json_end = cleaned_text.rfind('}')
         
-        # Try to parse the cleaned response
-        try:
-            result = json.loads(cleaned_text)
-            if isinstance(result, dict) and 'operations' in result:
-                # Validate all operations
-                valid_operations = []
-                for op in result['operations']:
-                    try:
-                        # Validate path exists
-                        if 'path' not in op:
-                            print(f"Skipping operation: missing path field")
+        if json_start != -1 and json_end != -1 and json_start < json_end:
+            try:
+                # Extract and parse the JSON part
+                json_text = cleaned_text[json_start:json_end + 1]
+                result = json.loads(json_text)
+                
+                if isinstance(result, dict) and 'operations' in result:
+                    # Validate operations
+                    valid_operations = []
+                    for op in result['operations']:
+                        if not isinstance(op, dict):
                             continue
                             
-                        if op['type'] == 'create_file':
-                            # Validate content exists and is complete
-                            if 'content' not in op or not op['content'].strip():
-                                print(f"Skipping create operation: missing or empty content for {op['path']}")
-                                continue
-                            # Check for incomplete content
-                            if '...' in op['content'] or op['content'].rstrip().endswith('\\'):
-                                print(f"Skipping create operation: truncated content in {op['path']}")
-                                continue
-                                
-                        elif op['type'] == 'edit_file':
-                            if 'changes' not in op:
-                                print(f"Skipping edit operation: missing changes array for {op['path']}")
-                                continue
+                        # Ensure required fields are present
+                        if 'type' not in op or 'path' not in op:
+                            continue
                             
-                            # Filter out incomplete changes
-                            valid_changes = []
-                            for i, change in enumerate(op['changes']):
-                                try:
-                                    # Validate both fields exist and are complete
-                                    if not all(key in change for key in ['old', 'new']):
-                                        print(f"Skipping change {i}: missing old/new fields in {op['path']}")
-                                        continue
-                                        
-                                    # Check if either field is incomplete
-                                    old_text = change.get('old', '').strip()
-                                    new_text = change.get('new', '').strip()
-                                    
-                                    if not old_text or not new_text:
-                                        print(f"Skipping change {i}: empty old/new content in {op['path']}")
-                                        continue
-                                        
-                                    # Check for truncation in either field
-                                    if any(marker in old_text or marker in new_text for marker in truncation_markers):
-                                        print(f"Skipping change {i}: truncated content in {op['path']}")
-                                        continue
-                                        
-                                    valid_changes.append(change)
-                                except Exception as e:
-                                    print(f"Error processing change {i} in {op['path']}: {str(e)}")
-                                    continue
+                        # Validate operation type
+                        if op['type'] not in ['create_file', 'edit_file', 'remove_file', 'rename_file']:
+                            continue
                             
-                            if not valid_changes:
-                                print(f"Skipping operation: no valid changes for {op['path']}")
-                                continue
-                                
-                            op['changes'] = valid_changes
-                            
-                        # Validate explanation exists and is complete
-                        if 'explanation' not in op or not op['explanation'].strip():
-                            print(f"Skipping operation: missing or empty explanation for {op['path']}")
+                        # Validate operation-specific fields
+                        if op['type'] == 'create_file' and 'content' not in op:
+                            continue
+                        elif op['type'] == 'edit_file' and 'changes' not in op:
+                            continue
+                        elif op['type'] == 'rename_file' and 'new_path' not in op:
                             continue
                             
                         valid_operations.append(op)
-                    except Exception as e:
-                        print(f"Error processing operation for {op.get('path', 'unknown')}: {str(e)}")
-                        continue
-                
-                if not valid_operations:
-                    raise ValueError("No valid operations found in the response. Please try again with a simpler request.")
                     
-                result['operations'] = valid_operations
-                return result
-        except json.JSONDecodeError as e:
-            print(f"JSON decode error: {str(e)}")  # Debug log
-            print(f"Problematic text: {cleaned_text}")  # Debug log
-            
-            # Try to extract just the JSON part if there's extra text
+                    if valid_operations:
+                        result['operations'] = valid_operations
+                        return result
+                        
+            except json.JSONDecodeError:
+                pass
+                
+        # If we couldn't parse the response, try one more time with the model
+        if model_id == 'claude':
             try:
-                # Find the first { and last }
-                start = cleaned_text.find('{')
-                end = cleaned_text.rfind('}')
-                if start != -1 and end != -1 and start < end:
-                    json_text = cleaned_text[start:end+1]
-                    result = json.loads(json_text)
+                # Ask Claude to fix its response
+                response = client.messages.create(
+                    model=model_config['models']['code'],
+                    messages=[{
+                        "role": "user",
+                        "content": "Your last response was not in valid JSON format. Please provide your response again, ensuring it's a valid JSON object with 'explanation' and 'operations' fields as specified in the system prompt. Include ONLY the JSON object, no markdown or other text."
+                    }],
+                    temperature=0.1,
+                    max_tokens=4096
+                )
+                retry_text = response.content[0].text.strip()
+                if retry_text.startswith('{') and retry_text.endswith('}'):
+                    result = json.loads(retry_text)
                     if isinstance(result, dict) and 'operations' in result:
                         return result
             except:
                 pass
-                
-            raise ValueError("Could not parse response as valid JSON. The response may be truncated or malformed.")
+        else:
+            # For other models, try to get a new response
+            try:
+                response = client.chat.completions.create(
+                    model=model_config['models']['code'],
+                    messages=messages + [{
+                        "role": "assistant",
+                        "content": full_text
+                    }, {
+                        "role": "user",
+                        "content": "Your last response was not in valid JSON format. Please provide your response again as a valid JSON object with 'explanation' and 'operations' fields. Include ONLY the JSON object, no markdown or other text."
+                    }],
+                    temperature=0.1,
+                    stream=False
+                )
+                retry_text = response.choices[0].message.content.strip()
+                if retry_text.startswith('{') and retry_text.endswith('}'):
+                    result = json.loads(retry_text)
+                    if isinstance(result, dict) and 'operations' in result:
+                        return result
+            except:
+                pass
 
-        raise ValueError("Could not find valid JSON response. Please try again with a clearer prompt.")
+        raise ValueError("Could not get a valid JSON response. Please try again with a clearer prompt.")
         
     except Exception as e:
         socketio.emit('status', {'message': f'Error: {str(e)}', 'step': -1})
