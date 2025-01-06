@@ -803,13 +803,15 @@ class WorkspaceManager:
         import os
 
         async def process_chunk(chunk, chunk_index):
-            # Process each chunk in a separate thread
-            with ThreadPoolExecutor() as executor:
+            max_retries = 3
+            retry_count = 0
+            
+            while retry_count < max_retries:
                 try:
                     client = model_clients[model_id]
                     model_config = AVAILABLE_MODELS[model_id]
                     
-                    print(f"\n=== Step 1: Preparing Request for Chunk {chunk_index + 1}/{len(chunks)} ===")
+                    print(f"\n=== Step 1: Preparing Request for Chunk {chunk_index + 1}/{len(chunks)} (Attempt {retry_count + 1}) ===")
                     print(f"Model: {model_id}")
                     print(f"Prompt length: {len(prompt)} characters")
                     
@@ -865,24 +867,10 @@ class WorkspaceManager:
                                 full_text = response.content[0].text
                             else:
                                 print("Error: No content in Claude's response")
-                                return None
+                                raise ValueError("No content in response")
                         except Exception as e:
                             print(f"Error with Claude API: {str(e)}")
-                            return None
-                        print(f"\nResponse received in {time.time() - start_time:.1f}s")
-                        print(f"Response length: {len(full_text)} characters")
-                        
-                        # Emit progress for consistency with streaming
-                        socketio.emit('status', {
-                            'message': f'Received response for chunk {chunk_index + 1}/{len(chunks)}',
-                            'step': 3,
-                            'progress': {
-                                'chunk': chunk_index + 1,
-                                'total_chunks': len(chunks),
-                                'chars': len(full_text),
-                                'elapsed': time.time() - start_time
-                            }
-                        })
+                            raise
                     else:
                         print("Request sent, waiting for response...")
                         socketio.emit('status', {
@@ -890,43 +878,48 @@ class WorkspaceManager:
                             'step': 3
                         })
                         
-                        response = client.chat.completions.create(
-                            model=model_config['models']['code'],
-                            messages=messages,
-                            temperature=0.1,
-                            stream=True
-                        )
-                        
-                        for chunk_response in response:
-                            if (chunk_response and 
-                                hasattr(chunk_response.choices[0], 'delta') and 
-                                hasattr(chunk_response.choices[0].delta, 'content')):
-                                content = chunk_response.choices[0].delta.content
-                                if content is not None:
-                                    full_text += content
-                                    chunk_count += 1
-                                
-                                # Update status periodically
-                                current_time = time.time()
-                                if current_time - last_update >= update_interval:
-                                    elapsed = current_time - start_time
-                                    tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
-                                    print(f"\rReceived {chunk_count} chunks ({len(full_text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
-                                    socketio.emit('status', {
-                                        'message': f'Processing chunk {chunk_index + 1}/{len(chunks)}... ({len(full_text)} characters)',
-                                        'step': 3,
-                                        'progress': {
-                                            'chunk': chunk_index + 1,
-                                            'total_chunks': len(chunks),
-                                            'chars': len(full_text),
-                                            'elapsed': elapsed,
-                                            'rate': tokens_per_second
-                                        }
-                                    })
-                                    last_update = current_time
-                        
-                        print(f"\nResponse complete in {time.time() - start_time:.1f}s")
-                        print(f"Total response size: {len(full_text)} characters in {chunk_count} chunks")
+                        try:
+                            response = client.chat.completions.create(
+                                model=model_config['models']['code'],
+                                messages=messages,
+                                temperature=0.1,
+                                stream=True
+                            )
+                            
+                            for chunk_response in response:
+                                if (chunk_response and 
+                                    hasattr(chunk_response.choices[0], 'delta') and 
+                                    hasattr(chunk_response.choices[0].delta, 'content')):
+                                    content = chunk_response.choices[0].delta.content
+                                    if content is not None:
+                                        full_text += content
+                                        chunk_count += 1
+                                    
+                                    # Update status periodically
+                                    current_time = time.time()
+                                    if current_time - last_update >= update_interval:
+                                        elapsed = current_time - start_time
+                                        tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
+                                        print(f"\rReceived {chunk_count} chunks ({len(full_text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
+                                        socketio.emit('status', {
+                                            'message': f'Processing chunk {chunk_index + 1}/{len(chunks)}... ({len(full_text)} characters)',
+                                            'step': 3,
+                                            'progress': {
+                                                'chunk': chunk_index + 1,
+                                                'total_chunks': len(chunks),
+                                                'chars': len(full_text),
+                                                'elapsed': elapsed,
+                                                'rate': tokens_per_second
+                                            }
+                                        })
+                                        last_update = current_time
+                        except Exception as e:
+                            print(f"Error streaming response: {str(e)}")
+                            raise
+                    
+                    if not full_text.strip():
+                        print(f"Empty response received for chunk {chunk_index + 1}")
+                        raise ValueError("Empty response received")
                     
                     print(f"\n=== Step 3: Processing Response for Chunk {chunk_index + 1} ===")
                     socketio.emit('status', {
@@ -955,6 +948,13 @@ class WorkspaceManager:
                                     operation['path'] = operation['path'].replace('\\', '/')
                                 if 'new_path' in operation:
                                     operation['new_path'] = operation['new_path'].replace('\\', '/')
+                                # Ensure all required fields are present
+                                if 'type' not in operation:
+                                    raise ValueError(f"Missing 'type' in operation: {operation}")
+                                if operation['type'] == 'edit_file' and 'changes' not in operation:
+                                    raise ValueError(f"Missing 'changes' in edit operation: {operation}")
+                                if operation['type'] == 'create_file' and 'content' not in operation:
+                                    raise ValueError(f"Missing 'content' in create operation: {operation}")
                             print(f"Successfully parsed response with {len(result['operations'])} operations")
                             return result
                     except json.JSONDecodeError:
@@ -972,21 +972,34 @@ class WorkspaceManager:
                                             operation['path'] = operation['path'].replace('\\', '/')
                                         if 'new_path' in operation:
                                             operation['new_path'] = operation['new_path'].replace('\\', '/')
+                                        # Ensure all required fields are present
+                                        if 'type' not in operation:
+                                            raise ValueError(f"Missing 'type' in operation: {operation}")
+                                        if operation['type'] == 'edit_file' and 'changes' not in operation:
+                                            raise ValueError(f"Missing 'changes' in edit operation: {operation}")
+                                        if operation['type'] == 'create_file' and 'content' not in operation:
+                                            raise ValueError(f"Missing 'content' in create operation: {operation}")
                                     print(f"Successfully extracted and parsed JSON with {len(result['operations'])} operations")
                                     return result
                         except:
                             pass
                     
                     print(f"Failed to parse valid response from chunk {chunk_index + 1}")
-                    return None
+                    raise ValueError("Failed to parse valid response")
                     
                 except Exception as e:
-                    print(f"Error processing chunk {chunk_index + 1}: {str(e)}")
+                    print(f"Error processing chunk {chunk_index + 1} (Attempt {retry_count + 1}): {str(e)}")
                     socketio.emit('status', {
-                        'message': f'Error processing chunk {chunk_index + 1}: {str(e)}',
+                        'message': f'Error processing chunk {chunk_index + 1} (Attempt {retry_count + 1}): {str(e)}',
                         'step': -1
                     })
-                    return None
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        print(f"Retrying chunk {chunk_index + 1}...")
+                        await asyncio.sleep(1)  # Wait before retrying
+                    else:
+                        print(f"Max retries reached for chunk {chunk_index + 1}")
+                        return None
         
         print("\n=== Starting Parallel Processing ===")
         print(f"Total chunks: {len(chunks)}")
@@ -999,10 +1012,34 @@ class WorkspaceManager:
         tasks = [process_chunk(chunk, i) for i, chunk in enumerate(chunks)]
         results = await asyncio.gather(*tasks)
         
-        # Filter out None results
-        valid_results = [result for result in results if result is not None]
+        # Filter out None results and validate operations
+        valid_results = []
+        for result in results:
+            if result is not None and isinstance(result, dict) and 'operations' in result:
+                # Validate each operation
+                valid_operations = True
+                for operation in result['operations']:
+                    if not all(key in operation for key in ['type', 'path']):
+                        valid_operations = False
+                        break
+                    if operation['type'] == 'edit_file' and 'changes' not in operation:
+                        valid_operations = False
+                        break
+                    if operation['type'] == 'create_file' and 'content' not in operation:
+                        valid_operations = False
+                        break
+                if valid_operations:
+                    valid_results.append(result)
+        
         print(f"\n=== Processing Complete ===")
         print(f"Successfully processed {len(valid_results)}/{len(chunks)} chunks")
+        
+        if not valid_results:
+            print("No valid results received from any chunk")
+            socketio.emit('status', {
+                'message': 'No valid results received from any chunk',
+                'step': -1
+            })
         
         return valid_results
 
