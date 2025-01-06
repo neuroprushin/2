@@ -905,17 +905,12 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         print("\n=== Step 2: Sending Request to AI Model ===")
         
         if model_id == 'claude':
-            # Use Anthropic's client interface with chat-focused system message
-            chat_system_message = """You are a helpful AI assistant that can discuss code and provide explanations.
-Please respond in a natural, conversational way. Do not format responses as code diffs or JSON operations.
-Instead, explain concepts, answer questions, and provide insights about the code in a clear, readable format."""
-
+            # Use Anthropic's client interface
             response = client.messages.create(
-                model=model_config['models']['chat'],
-                system=chat_system_message,
+                model=model_config['models']['code'],
                 messages=[{
                     "role": "user",
-                    "content": f"Context:\n{system_message}\n\nQuestion: {user_message}"
+                    "content": f"{system_message}\n\nUser: {user_message}"
                 }],
                 temperature=0.7,
                 max_tokens=2048
@@ -1314,20 +1309,11 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
             response = client.messages.create(
                 model=model_config['models']['code'],
                 messages=[{
-                    "role": "system",
-                    "content": system_prompt
-                }] + ([{
-                    "role": "system",
-                    "content": f"Workspace context:\n{workspace_context}"
-                }] if workspace_context else []) + ([{
-                    "role": "system",
-                    "content": files_content_str
-                }] if files_content else []) + [{
                     "role": "user",
-                    "content": prompt
+                    "content": f"{system_message}\n\nUser: {user_message}"
                 }],
-                temperature=0.1,
-                max_tokens=4096
+                temperature=0.7,
+                max_tokens=2048
             )
             full_text = response.content[0].text
             print(f"\nResponse received in {time.time() - start_time:.1f}s")

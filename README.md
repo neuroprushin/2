@@ -104,10 +104,6 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 
 Contributions are welcome! Please feel free to submit pull requests.
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
-
 ## Special Thanks
 
 - **Nikole Cardoso** for her invaluable contributions and support
@@ -115,3 +111,15 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 - **Felipe Santos** for his dedication and insights
 
 Their contributions have been instrumental in making J.A.R.V.I.S. better.
+
+## Platform Compatibility
+
+This application has been tested and confirmed working on:
+- Linux (native)
+- Windows Subsystem for Linux (WSL 2)
+
+For best results, we recommend running the application in one of these environments.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
