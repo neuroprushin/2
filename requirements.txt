@@ -5,3 +5,8 @@ openai==1.57.0
 flask-socketio==5.5.0
 eventlet==0.38.2
 pylama==8.4.1
+python-engineio==4.11.2
+python-socketio==5.12.1
+aiohttp==3.11.11
+asgiref==3.8.1
+hypercorn==0.17.3

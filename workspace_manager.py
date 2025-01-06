@@ -13,6 +13,8 @@ class WorkspaceManager:
     PREVIEW_SIZE = 10 * 1024  # 10KB for previews
     CHUNK_SIZE = 1024 * 1024  # 1MB chunks for large file reading
     LAZY_LOAD_THRESHOLD = 1000  # Number of files before switching to lazy loading
+    MAX_TOKENS_PER_REQUEST = 30000  # Maximum tokens per request
+    TOKEN_BUFFER = 1000  # Buffer to account for system messages and formatting
     
     # File type configurations
     BINARY_EXTENSIONS = {
@@ -664,8 +666,315 @@ class WorkspaceManager:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 chunk = f.read(1024)  # Read first 1KB
-                return bool(chunk.translate(None, string.printable))  # Returns True if contains non-printable chars
+                return any(char not in string.printable for char in chunk)
         except (UnicodeDecodeError, IOError):
             return True  # If we can't read it as text, it's probably binary
         
         return False 
+    
+    def chunk_workspace_files(self, files_content: Dict[str, str], max_tokens: int = None) -> List[Dict[str, Dict[str, str]]]:
+        """Split workspace files into chunks that respect the token limit.
+        
+        Args:
+            files_content: Dictionary mapping file paths to their contents
+            max_tokens: Maximum tokens per chunk (defaults to MAX_TOKENS_PER_REQUEST - TOKEN_BUFFER)
+            
+        Returns:
+            List of dictionaries, each containing a subset of files that fits within token limit
+        """
+        if max_tokens is None:
+            max_tokens = self.MAX_TOKENS_PER_REQUEST - self.TOKEN_BUFFER
+            
+        chunks = []
+        current_chunk = {}
+        current_tokens = 0
+        
+        for path, content in files_content.items():
+            # Estimate tokens (rough approximation: 4 chars = 1 token)
+            file_tokens = len(content) // 4
+            
+            if current_tokens + file_tokens > max_tokens:
+                if current_chunk:  # Save current chunk if not empty
+                    chunks.append(current_chunk)
+                current_chunk = {path: content}
+                current_tokens = file_tokens
+            else:
+                current_chunk[path] = content
+                current_tokens += file_tokens
+        
+        if current_chunk:  # Add the last chunk if not empty
+            chunks.append(current_chunk)
+            
+        return chunks
+
+    def get_workspace_files_chunked(self, workspace_dir: str, query: str = None, max_tokens: int = None) -> List[Dict[str, Dict[str, str]]]:
+        """Get workspace files split into chunks that respect the token limit.
+        
+        Args:
+            workspace_dir: Path to the workspace directory
+            query: Optional query to filter relevant files
+            max_tokens: Maximum tokens per chunk
+            
+        Returns:
+            List of chunked file contents, each chunk respecting token limit
+        """
+        # Get all relevant files first
+        files_content = self.get_workspace_files(workspace_dir, query)
+        
+        # Split into chunks
+        return self.chunk_workspace_files(files_content, max_tokens)
+
+    async def process_chunks_parallel(self, chunks: List[Dict[str, Dict[str, str]]], prompt: str, model_id: str) -> List[Dict]:
+        """Process file chunks in parallel.
+        
+        Args:
+            chunks: List of file content chunks
+            prompt: The user's prompt
+            model_id: The model to use for processing
+            
+        Returns:
+            List of suggestions from processing each chunk
+        """
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        from app import model_clients, AVAILABLE_MODELS, system_prompt, socketio
+        import json
+        import time
+        
+        async def process_chunk(chunk, chunk_index):
+            # Process each chunk in a separate thread
+            with ThreadPoolExecutor() as executor:
+                try:
+                    client = model_clients[model_id]
+                    model_config = AVAILABLE_MODELS[model_id]
+                    
+                    print(f"\n=== Step 1: Preparing Request for Chunk {chunk_index + 1}/{len(chunks)} ===")
+                    print(f"Model: {model_id}")
+                    print(f"Prompt length: {len(prompt)} characters")
+                    
+                    # Extract and log information about files in chunk
+                    files_info = []
+                    for file_path, content in chunk.items():
+                        lines = content.count('\n') + 1
+                        size = len(content.encode('utf-8'))
+                        files_info.append({
+                            'path': file_path,
+                            'lines': lines,
+                            'size': size
+                        })
+                    
+                    # Log and emit detailed status about chunk files
+                    file_details = '\n'.join(f"- {f['path']} ({f['lines']} lines, {f['size']} bytes)" for f in files_info)
+                    print(f"\nFiles in chunk {chunk_index + 1}:\n{file_details}")
+                    socketio.emit('status', {
+                        'message': f'Processing chunk {chunk_index + 1}/{len(chunks)} ({len(files_info)} files)...',
+                        'step': 1,
+                        'details': {
+                            'chunk': chunk_index + 1,
+                            'total_chunks': len(chunks),
+                            'files': files_info,
+                            'total_files': len(files_info),
+                            'total_lines': sum(f['lines'] for f in files_info),
+                            'total_size': sum(f['size'] for f in files_info)
+                        }
+                    })
+                    
+                    # Build context from chunk files
+                    context = "Here are the relevant files in the workspace:\n\n"
+                    for file_path, content in chunk.items():
+                        context += f"File: {file_path}\nContent:\n{content}\n\n"
+                    
+                    # Create messages array
+                    messages = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "system", "content": f"Workspace context:\n{context}"},
+                        {"role": "user", "content": prompt}
+                    ]
+                    
+                    print(f"\n=== Step 2: Sending Request for Chunk {chunk_index + 1} ===")
+                    socketio.emit('status', {
+                        'message': f'Sending request for chunk {chunk_index + 1}/{len(chunks)}...',
+                        'step': 2
+                    })
+                    
+                    # Use streaming for better progress tracking
+                    start_time = time.time()
+                    full_text = ""
+                    chunk_count = 0
+                    last_update = time.time()
+                    update_interval = 0.5
+                    
+                    if model_id == 'claude':
+                        print("Sending request to Claude model...")
+                        # Claude uses a different message format
+                        system_content = f"{system_prompt}\n\nWorkspace context:\n{context}"
+                        response = client.messages.create(
+                            model=model_config['models']['code'],
+                            system=system_content,
+                            messages=[{
+                                "role": "user",
+                                "content": prompt
+                            }],
+                            temperature=0.7,
+                            max_tokens=2048
+                        )
+                        # Claude's response format is different from OpenAI's
+                        if hasattr(response, 'content') and len(response.content) > 0:
+                            full_text = response.content[0].text
+                        else:
+                            print("Error: No content in Claude's response")
+                            return None
+                        print(f"\nResponse received in {time.time() - start_time:.1f}s")
+                        print(f"Response length: {len(full_text)} characters")
+                        
+                        # Emit progress for consistency with streaming
+                        socketio.emit('status', {
+                            'message': f'Received response for chunk {chunk_index + 1}/{len(chunks)}',
+                            'step': 3,
+                            'progress': {
+                                'chunk': chunk_index + 1,
+                                'total_chunks': len(chunks),
+                                'chars': len(full_text),
+                                'elapsed': time.time() - start_time
+                            }
+                        })
+                    else:
+                        print("Request sent, waiting for response...")
+                        socketio.emit('status', {
+                            'message': f'Receiving response for chunk {chunk_index + 1}/{len(chunks)}...',
+                            'step': 3
+                        })
+                        
+                        response = client.chat.completions.create(
+                            model=model_config['models']['code'],
+                            messages=messages,
+                            temperature=0.1,
+                            stream=True
+                        )
+                        
+                        for chunk_response in response:
+                            if (chunk_response and 
+                                hasattr(chunk_response.choices[0], 'delta') and 
+                                hasattr(chunk_response.choices[0].delta, 'content')):
+                                content = chunk_response.choices[0].delta.content
+                                if content is not None:
+                                    full_text += content
+                                    chunk_count += 1
+                                
+                                # Update status periodically
+                                current_time = time.time()
+                                if current_time - last_update >= update_interval:
+                                    elapsed = current_time - start_time
+                                    tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
+                                    print(f"\rReceived {chunk_count} chunks ({len(full_text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
+                                    socketio.emit('status', {
+                                        'message': f'Processing chunk {chunk_index + 1}/{len(chunks)}... ({len(full_text)} characters)',
+                                        'step': 3,
+                                        'progress': {
+                                            'chunk': chunk_index + 1,
+                                            'total_chunks': len(chunks),
+                                            'chars': len(full_text),
+                                            'elapsed': elapsed,
+                                            'rate': tokens_per_second
+                                        }
+                                    })
+                                    last_update = current_time
+                        
+                        print(f"\nResponse complete in {time.time() - start_time:.1f}s")
+                        print(f"Total response size: {len(full_text)} characters in {chunk_count} chunks")
+                    
+                    print(f"\n=== Step 3: Processing Response for Chunk {chunk_index + 1} ===")
+                    socketio.emit('status', {
+                        'message': f'Processing response for chunk {chunk_index + 1}/{len(chunks)}...',
+                        'step': 4
+                    })
+                    
+                    # Clean up the response text
+                    cleaned_text = full_text.strip()
+                    
+                    # Remove markdown code block markers
+                    if cleaned_text.startswith('```'):
+                        first_newline = cleaned_text.find('\n')
+                        if first_newline != -1:
+                            cleaned_text = cleaned_text[first_newline:].strip()
+                        if cleaned_text.endswith('```'):
+                            cleaned_text = cleaned_text[:-3].strip()
+                    
+                    # Parse the response
+                    try:
+                        result = json.loads(cleaned_text)
+                        if isinstance(result, dict) and 'operations' in result:
+                            print(f"Successfully parsed response with {len(result['operations'])} operations")
+                            return result
+                    except json.JSONDecodeError:
+                        # Try to extract just the JSON part
+                        try:
+                            start = cleaned_text.find('{')
+                            end = cleaned_text.rfind('}')
+                            if start != -1 and end != -1 and start < end:
+                                json_text = cleaned_text[start:end+1]
+                                result = json.loads(json_text)
+                                if isinstance(result, dict) and 'operations' in result:
+                                    print(f"Successfully extracted and parsed JSON with {len(result['operations'])} operations")
+                                    return result
+                        except:
+                            pass
+                    
+                    print(f"Failed to parse valid response from chunk {chunk_index + 1}")
+                    return None
+                    
+                except Exception as e:
+                    print(f"Error processing chunk {chunk_index + 1}: {str(e)}")
+                    socketio.emit('status', {
+                        'message': f'Error processing chunk {chunk_index + 1}: {str(e)}',
+                        'step': -1
+                    })
+                    return None
+        
+        print("\n=== Starting Parallel Processing ===")
+        print(f"Total chunks: {len(chunks)}")
+        socketio.emit('status', {
+            'message': f'Starting parallel processing of {len(chunks)} chunks...',
+            'step': 1
+        })
+        
+        # Process all chunks in parallel
+        tasks = [process_chunk(chunk, i) for i, chunk in enumerate(chunks)]
+        results = await asyncio.gather(*tasks)
+        
+        # Filter out None results
+        valid_results = [result for result in results if result is not None]
+        print(f"\n=== Processing Complete ===")
+        print(f"Successfully processed {len(valid_results)}/{len(chunks)} chunks")
+        
+        return valid_results
+
+    def merge_suggestions(self, suggestions_list: List[Dict]) -> Dict:
+        """Merge suggestions from multiple chunks into a single response.
+        
+        Args:
+            suggestions_list: List of suggestions from different chunks
+            
+        Returns:
+            Merged suggestions dictionary
+        """
+        merged = {
+            'explanation': 'Combined suggestions from parallel processing',
+            'operations': []
+        }
+        
+        seen_paths = set()
+        
+        for suggestions in suggestions_list:
+            if not suggestions or 'operations' not in suggestions:
+                continue
+                
+            for operation in suggestions['operations']:
+                # Skip duplicate operations on the same file
+                if operation['path'] in seen_paths:
+                    continue
+                    
+                merged['operations'].append(operation)
+                seen_paths.add(operation['path'])
+        
+        return merged 

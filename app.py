@@ -19,6 +19,10 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from anthropic import Anthropic
 from workspace_manager import WorkspaceManager
+from asgiref.wsgi import WsgiToAsgi
+from hypercorn.config import Config
+from hypercorn.asyncio import serve
+import asyncio
 
 # Model configurations
 AVAILABLE_MODELS = {
@@ -154,7 +158,11 @@ for model_id, config in AVAILABLE_MODELS.items():
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # For session management
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_handlers=True)
+
+# Convert WSGI app to ASGI
+asgi_app = WsgiToAsgi(app)
+
 load_dotenv()
 
 # Set up workspace directory
@@ -516,14 +524,14 @@ def expand_directory():
         }), 500
 
 @app.route('/process', methods=['POST'])
-def process_prompt():
+async def process_prompt():
     try:
         data = request.json
         prompt = data.get('prompt')
         workspace_dir = data.get('workspace_dir')
         model_id = data.get('model_id', 'deepseek')
         attachments = data.get('attachments', [])
-        context_path = data.get('context_path')  # Get the context path
+        context_path = data.get('context_path')
         
         if not prompt:
             return jsonify({'status': 'error', 'message': 'No prompt provided'}), 400
@@ -537,7 +545,7 @@ def process_prompt():
         # Use workspace manager to get relevant files based on the query and context
         socketio.emit('status', {'message': 'Reading workspace files...', 'step': 1})
         
-        # If we have a context path, prioritize that file/folder
+        # Get files in chunks that respect token limits
         if context_path:
             full_path = os.path.join(workspace_dir, context_path)
             if os.path.exists(full_path):
@@ -545,8 +553,9 @@ def process_prompt():
                     # For a file, get its content directly
                     with open(full_path, 'r', encoding='utf-8') as f:
                         files_content = {context_path: f.read()}
+                    chunks = [files_content]  # Single chunk for single file
                 else:
-                    # For a directory, get contents of files within it
+                    # For a directory, get contents of files within it in chunks
                     files_content = {}
                     for root, _, files in os.walk(full_path):
                         for file in files:
@@ -558,39 +567,17 @@ def process_prompt():
                                         files_content[rel_path] = f.read()
                                 except Exception as e:
                                     print(f"Error reading file {file_path}: {e}")
+                    chunks = workspace_manager.chunk_workspace_files(files_content)
         else:
-            # No context path, get relevant files based on the query
-            files_content = workspace_manager.get_workspace_files(workspace_dir, query=prompt)
-        
-        # Add attachment contents to files_content
-        if attachments:
-            for attachment in attachments:
-                files_content[f"[ATTACHMENT] {attachment['name']}"] = attachment['content']
-        
-        # Build context from files
-        context = "Here are the relevant files in the workspace:\n\n"
-        for file_path, content in files_content.items():
-            context += f"File: {file_path}\nContent:\n{content}\n\n"
-        
-        # Construct a more focused system message based on context
-        if context_path:
-            if os.path.isfile(os.path.join(workspace_dir, context_path)):
-                context_type = "file"
-            else:
-                context_type = "folder"
-            system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss code.
-You are currently analyzing this specific {context_type}: {context_path}
-{context}
+            # No context path, get relevant files based on the query in chunks
+            chunks = workspace_manager.get_workspace_files_chunked(workspace_dir, query=prompt)
 
-Please provide helpful responses focused on this {context_type} and its contents."""
-        else:
-            system_message = f"""You are a helpful AI assistant powered by {AVAILABLE_MODELS[model_id]['name']} that can discuss the code in the workspace.
-{context}
-
-Please provide helpful responses about the code and files in this workspace."""
+        # Process chunks in parallel
+        socketio.emit('status', {'message': 'Processing files in parallel...', 'step': 2})
+        suggestions_list = await workspace_manager.process_chunks_parallel(chunks, prompt, model_id)
         
-        # Get suggestions from AI
-        suggestions = get_code_suggestion(prompt, files_content, system_message=system_message, model_id=model_id)
+        # Merge suggestions from all chunks
+        suggestions = workspace_manager.merge_suggestions(suggestions_list)
         
         if not suggestions or 'operations' not in suggestions:
             return jsonify({
@@ -624,9 +611,10 @@ Please provide helpful responses about the code and files in this workspace."""
         })
         
     except Exception as e:
+        print(f"Error processing prompt: {str(e)}")
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': f'Error processing prompt: {str(e)}'
         }), 500
 
 @app.route('/workspace/delete', methods=['POST'])
@@ -1258,277 +1246,6 @@ def apply_changes(suggestions, workspace_dir):
     except Exception as e:
         raise Exception(f"Failed to apply changes: {str(e)}")
 
-def get_code_suggestion(prompt, files_content=None, system_message=None, model_id='deepseek'):
-    """Get code suggestions from the selected AI model"""
-    if model_id not in model_clients:
-        raise Exception(f"Model {model_id} is not configured. Please check your API keys.")
-        
-    client = model_clients[model_id]
-    model_config = AVAILABLE_MODELS[model_id]
-    
-    try:
-        print("\n=== Step 1: Preparing AI Request ===")
-        print(f"Model: {model_id}")
-        print(f"Prompt length: {len(prompt)} characters")
-        
-        # Extract and log information about files in context
-        files_info = []
-        if files_content:
-            for file_path, content in files_content.items():
-                lines = content.count('\n') + 1
-                size = len(content.encode('utf-8'))  # Get size in bytes
-                files_info.append({
-                    'path': file_path,
-                    'lines': lines,
-                    'size': size
-                })
-            
-            # Log and emit detailed status about context files
-            file_details = '\n'.join(f"- {f['path']} ({f['lines']} lines, {f['size']} bytes)" for f in files_info)
-            print(f"\nContext files:\n{file_details}")
-            socketio.emit('status', {
-                'message': f'Using {len(files_info)} files as context...',
-                'step': 1,
-                'details': {
-                    'files': files_info,
-                    'total_files': len(files_info),
-                    'total_lines': sum(f['lines'] for f in files_info),
-                    'total_size': sum(f['size'] for f in files_info)
-                }
-            })
-        
-        if system_message:
-            print(f"\nSystem message length: {len(system_message)} characters")
-        
-        socketio.emit('status', {'message': 'Sending request to AI model...', 'step': 1})
-        
-        # Create the messages array for the chat
-        messages = []
-        
-        # Add system prompt
-        messages.append({"role": "system", "content": system_prompt})
-        
-        # Add workspace context if provided
-        if system_message:
-            print("\nAdding workspace context...")
-            messages.append({"role": "system", "content": f"Workspace context:\n{system_message}"})
-        
-        # Add files content if provided
-        if files_content:
-            files_content_str = "Files content:\n"
-            for path, content in files_content.items():
-                files_content_str += f"\nFile: {path}\nContent:\n{content}\n"
-            messages.append({"role": "system", "content": files_content_str})
-        
-        # Add the user's prompt
-        messages.append({"role": "user", "content": prompt})
-        
-        print("\n=== Step 2: Sending Request to AI Model ===")
-        start_time = time.time()
-        
-        if model_id == 'claude':
-            # Use Anthropic's client interface
-            response = client.messages.create(
-                model=model_config['models']['code'],
-                messages=[{
-                    "role": "user",
-                    "content": f"{system_message}\n\nUser: {user_message}"
-                }],
-                temperature=0.7,
-                max_tokens=2048
-            )
-            text = response.content[0].text
-            print(f"\nResponse received in {time.time() - start_time:.1f}s")
-            print(f"Response length: {len(text)} characters")
-        else:
-            # Use OpenAI's client interface with streaming
-            response = client.chat.completions.create(
-                model=model_config['models']['code'],
-                messages=messages,
-                temperature=0.1,
-                stream=True
-            )
-            
-            print("Request sent, waiting for response...")
-            socketio.emit('status', {'message': 'Receiving AI response...', 'step': 2})
-            
-            # Process the streamed response
-            full_text = ""
-            chunk_count = 0
-            last_update = time.time()
-            update_interval = 0.5  # Update status every 0.5 seconds
-            
-            for chunk in response:
-                if chunk and hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
-                    content = chunk.choices[0].delta.content
-                    if content is not None:  # Add null check
-                        full_text += content
-                        chunk_count += 1
-                    else:
-                        print("\rReceived empty content chunk", end="")
-                    
-                    # Update status periodically
-                    current_time = time.time()
-                    if current_time - last_update >= update_interval:
-                        elapsed = current_time - start_time
-                        tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
-                        print(f"\rReceived {chunk_count} chunks ({len(full_text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
-                        socketio.emit('status', {
-                            'message': f'Receiving response... ({len(full_text)} characters)',
-                            'step': 2,
-                            'progress': {
-                                'chunks': chunk_count,
-                                'chars': len(full_text),
-                                'elapsed': elapsed,
-                                'rate': tokens_per_second
-                            }
-                        })
-                        last_update = current_time
-            
-            print(f"\nResponse complete in {time.time() - start_time:.1f}s")
-            print(f"Total response size: {len(full_text)} characters in {chunk_count} chunks")
-
-        # Clean up the response text
-        cleaned_text = full_text.strip()
-        
-        # Define truncation markers that indicate incomplete content
-        truncation_markers = [
-            '..."',  # Truncated string
-            '...\n',  # Truncated line
-            '...\r',  # Truncated line (Windows)
-            '...[',   # Truncated array
-            '...{',   # Truncated object
-            '...}',   # Truncated closing brace
-            '...]'    # Truncated closing bracket
-        ]
-        
-        # Remove any markdown code block markers more carefully
-        if cleaned_text.startswith('```'):
-            # Find the first newline after the opening ```
-            first_newline = cleaned_text.find('\n')
-            if first_newline != -1:
-                # Remove everything before the first newline (including ```json or just ```)
-                cleaned_text = cleaned_text[first_newline:].strip()
-            # Remove the closing ```
-            if cleaned_text.endswith('```'):
-                cleaned_text = cleaned_text[:-3].strip()
-        
-        # Check for obvious truncation
-        is_truncated = False
-        for marker in truncation_markers:
-            if marker in cleaned_text:
-                is_truncated = True
-                break
-                
-        # Check for trailing backslash truncation
-        if cleaned_text.rstrip().endswith('\\'):
-            is_truncated = True
-            
-        if is_truncated:
-            raise ValueError("Response appears to be truncated. Please try again with a smaller change set.")
-        
-        # Try to parse the cleaned response
-        try:
-            result = json.loads(cleaned_text)
-            if isinstance(result, dict) and 'operations' in result:
-                # Validate all operations
-                valid_operations = []
-                for op in result['operations']:
-                    try:
-                        # Validate path exists
-                        if 'path' not in op:
-                            print(f"Skipping operation: missing path field")
-                            continue
-                            
-                        if op['type'] == 'create_file':
-                            # Validate content exists and is complete
-                            if 'content' not in op or not op['content'].strip():
-                                print(f"Skipping create operation: missing or empty content for {op['path']}")
-                                continue
-                            # Check for incomplete content
-                            if '...' in op['content'] or op['content'].rstrip().endswith('\\'):
-                                print(f"Skipping create operation: truncated content in {op['path']}")
-                                continue
-                                
-                        elif op['type'] == 'edit_file':
-                            if 'changes' not in op:
-                                print(f"Skipping edit operation: missing changes array for {op['path']}")
-                                continue
-                            
-                            # Filter out incomplete changes
-                            valid_changes = []
-                            for i, change in enumerate(op['changes']):
-                                try:
-                                    # Validate both fields exist and are complete
-                                    if not all(key in change for key in ['old', 'new']):
-                                        print(f"Skipping change {i}: missing old/new fields in {op['path']}")
-                                        continue
-                                        
-                                    # Check if either field is incomplete
-                                    old_text = change.get('old', '').strip()
-                                    new_text = change.get('new', '').strip()
-                                    
-                                    if not old_text or not new_text:
-                                        print(f"Skipping change {i}: empty old/new content in {op['path']}")
-                                        continue
-                                        
-                                    # Check for truncation in either field
-                                    if any(marker in old_text or marker in new_text for marker in truncation_markers):
-                                        print(f"Skipping change {i}: truncated content in {op['path']}")
-                                        continue
-                                        
-                                    valid_changes.append(change)
-                                except Exception as e:
-                                    print(f"Error processing change {i} in {op['path']}: {str(e)}")
-                                    continue
-                            
-                            if not valid_changes:
-                                print(f"Skipping operation: no valid changes for {op['path']}")
-                                continue
-                                
-                            op['changes'] = valid_changes
-                            
-                        # Validate explanation exists and is complete
-                        if 'explanation' not in op or not op['explanation'].strip():
-                            print(f"Skipping operation: missing or empty explanation for {op['path']}")
-                            continue
-                            
-                        valid_operations.append(op)
-                    except Exception as e:
-                        print(f"Error processing operation for {op.get('path', 'unknown')}: {str(e)}")
-                        continue
-                
-                if not valid_operations:
-                    raise ValueError("No valid operations found in the response. Please try again with a simpler request.")
-                    
-                result['operations'] = valid_operations
-                return result
-        except json.JSONDecodeError as e:
-            print(f"JSON decode error: {str(e)}")  # Debug log
-            print(f"Problematic text: {cleaned_text}")  # Debug log
-            
-            # Try to extract just the JSON part if there's extra text
-            try:
-                # Find the first { and last }
-                start = cleaned_text.find('{')
-                end = cleaned_text.rfind('}')
-                if start != -1 and end != -1 and start < end:
-                    json_text = cleaned_text[start:end+1]
-                    result = json.loads(json_text)
-                    if isinstance(result, dict) and 'operations' in result:
-                        return result
-            except:
-                pass
-                
-            raise ValueError("Could not parse response as valid JSON. The response may be truncated or malformed.")
-
-        raise ValueError("Could not find valid JSON response. Please try again with a clearer prompt.")
-        
-    except Exception as e:
-        socketio.emit('status', {'message': f'Error: {str(e)}', 'step': -1})
-        print(f"\nError getting code suggestion: {str(e)}")
-        raise
-
 @app.route('/workspace/import-folder', methods=['POST'])
 def import_folder():
     try:
@@ -1719,11 +1436,9 @@ if __name__ == '__main__':
             path = os.path.join(root, file)
             extra_files.append(path)
     
-    # Run with eventlet server and reloader enabled
-    socketio.run(
-        app,
-        debug=True,
-        extra_files=extra_files,
-        host='0.0.0.0',
-        port=5000
-    ) 
+    # Run with SocketIO's built-in server
+    socketio.run(app, 
+                debug=True,
+                host='0.0.0.0',
+                port=5000,
+                extra_files=extra_files) 
