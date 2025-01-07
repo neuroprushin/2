@@ -1,10 +1,19 @@
 import os
 import shutil
 from datetime import datetime
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union, Any
 import json
 import mmap
 from pathlib import Path
+import re
+import hashlib
+from collections import defaultdict
+import threading
+from concurrent.futures import ThreadPoolExecutor
+import tempfile
+import subprocess
+import logging
+import time
 
 class WorkspaceManager:
     # File size thresholds and constants
@@ -12,45 +21,350 @@ class WorkspaceManager:
     PREVIEW_SIZE = 10 * 1024  # 10KB for previews
     CHUNK_SIZE = 1024 * 1024  # 1MB chunks for large file reading
     LAZY_LOAD_THRESHOLD = 1000  # Number of files before switching to lazy loading
+    MAX_CACHE_SIZE = 100 * 1024 * 1024  # 100MB max cache size
+    MAX_CACHE_ENTRIES = 1000  # Maximum number of cached files
+    INDEXING_CHUNK_SIZE = 5 * 1024 * 1024  # 5MB chunks for indexing
+    LARGE_FILE_THRESHOLD = 1 * 1024 * 1024  # 1MB threshold for large files
     
     # File type configurations
     BINARY_EXTENSIONS = {'.pyc', '.pyo', '.pyd', '.so', '.dll', '.exe', '.bin'}
-    SKIP_EXTENSIONS = {'.db'} | BINARY_EXTENSIONS
+    SKIP_EXTENSIONS = {'.db', '.log', '.cache'} | BINARY_EXTENSIONS
     SKIP_FOLDERS = {
-        '.git',
-        'node_modules',
-        '__pycache__',
-        'venv',
-        '.venv',
-        'env',
-        '.env',
-        'dist',
-        'build',
-        'target',  # Common for Java/Rust
-        'vendor',  # Common for PHP/Go
-        '.idea',   # JetBrains IDEs
-        '.vscode', # VS Code
-        'coverage',
-        '.next',   # Next.js
-        '.nuxt',   # Nuxt.js
-        '.output', # Various build outputs
-        'tmp',
-        'temp'
-    }  # Folders to always ignore
-    LARGE_FILE_THRESHOLD = 1 * 1024 * 1024  # 1MB
+        '.git', 'node_modules', '__pycache__', 'venv', '.venv', 'env', '.env',
+        'dist', 'build', 'target', 'vendor', '.idea', '.vscode', 'coverage',
+        '.next', '.nuxt', '.output', 'tmp', 'temp'
+    }
+    
+    # Language-specific patterns for better context understanding
+    LANGUAGE_PATTERNS = {
+        'python': {
+            'imports': r'^(?:from|import)\s+[\w.]+(?:\s+(?:as|import)\s+[\w.]+)*',
+            'classes': r'^class\s+\w+(?:\(.*?\))?:',
+            'functions': r'^def\s+\w+\s*\([^)]*\)\s*(?:->\s*[\w\[\],\s]+)?:',
+        },
+        'javascript': {
+            'imports': r'^(?:import|export)\s+.*?(?:from\s+[\'"].*?[\'"])?;?$',
+            'classes': r'^(?:export\s+)?class\s+\w+(?:\s+extends\s+\w+)?(?:\s+implements\s+\w+(?:\s*,\s*\w+)*)?',
+            'functions': r'^(?:async\s+)?function\s*\w*\s*\([^)]*\)',
+        }
+    }
     
     def __init__(self, workspace_root: str):
-        """Initialize workspace manager with root directory"""
+        """Initialize workspace manager with enhanced features"""
         self.workspace_root = workspace_root
         os.makedirs(workspace_root, exist_ok=True)
         
-        # Enhanced caching system
+        # Enhanced caching system with LRU and size tracking
         self._content_cache: Dict[str, Tuple[str, float, int]] = {}  # path -> (content, mtime, size)
         self._structure_cache: Dict[str, Tuple[List[dict], float]] = {}  # workspace -> (structure, mtime)
         self._chunk_cache: Dict[str, Dict[int, str]] = {}  # path -> {chunk_index: content}
+        self._symbol_cache: Dict[str, Dict[str, List[Tuple[int, str]]]] = {}  # path -> {symbol_type -> [(line_num, symbol)]}
+        self._dependency_graph: Dict[str, Set[str]] = defaultdict(set)  # file -> {dependent_files}
+        self._file_index: Dict[str, Dict[str, Any]] = {}  # path -> metadata
+        self._cache_size = 0
+        self._cache_lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=4)
         self._gitignore_patterns: List[str] = []
         self._load_gitignore()
         
+        # Initialize logging
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger('WorkspaceManager')
+        
+    def _update_cache_size(self, path: str, content: str, is_add: bool = True):
+        """Track cache size with thread safety"""
+        with self._cache_lock:
+            size = len(content.encode('utf-8'))
+            if is_add:
+                self._cache_size += size
+                # Implement LRU cache eviction if needed
+                while self._cache_size > self.MAX_CACHE_SIZE or len(self._content_cache) > self.MAX_CACHE_ENTRIES:
+                    oldest_path = next(iter(self._content_cache))
+                    oldest_content = self._content_cache.pop(oldest_path)[0]
+                    self._cache_size -= len(oldest_content.encode('utf-8'))
+            else:
+                self._cache_size -= size
+
+    def _index_file(self, file_path: str, content: Optional[str] = None) -> Dict[str, Any]:
+        """Index file contents for faster searching and context understanding"""
+        if not content:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                return {}  # Skip binary files
+        
+        ext = Path(file_path).suffix.lower()
+        lang = 'python' if ext == '.py' else 'javascript' if ext == '.js' else None
+        
+        index = {
+            'symbols': defaultdict(list),
+            'imports': set(),
+            'size': os.path.getsize(file_path),
+            'hash': hashlib.md5(content.encode()).hexdigest(),
+            'last_modified': os.path.getmtime(file_path),
+            'language': lang
+        }
+        
+        if lang and lang in self.LANGUAGE_PATTERNS:
+            patterns = self.LANGUAGE_PATTERNS[lang]
+            for symbol_type, pattern in patterns.items():
+                for i, line in enumerate(content.splitlines(), 1):
+                    if re.match(pattern, line.strip()):
+                        index['symbols'][symbol_type].append((i, line.strip()))
+                        if symbol_type == 'imports':
+                            index['imports'].add(line.strip())
+        
+        self._file_index[file_path] = index
+        return index
+
+    def _analyze_dependencies(self, files_content: Dict[str, str]) -> Dict[str, Set[str]]:
+        """Analyze and cache file dependencies"""
+        dependencies = defaultdict(set)
+        for file_path, content in files_content.items():
+            if file_path not in self._file_index:
+                self._index_file(file_path, content)
+            
+            if file_path in self._file_index:
+                index = self._file_index[file_path]
+                if index.get('language') == 'python':
+                    for imp in index.get('imports', set()):
+                        # Convert import statement to module path
+                        match = re.match(r'^from\s+([\w.]+)\s+import', imp)
+                        if match:
+                            module = match.group(1)
+                            dependencies[file_path].add(module.replace('.', '/') + '.py')
+        
+        return dependencies
+
+    def _get_file_content(self, file_path: str, start_chunk: int = 0, num_chunks: int = 1) -> str:
+        """Enhanced file content retrieval with chunked reading and caching"""
+        try:
+            file_size = os.path.getsize(file_path)
+            
+            # For small files, use content cache
+            if file_size < self.LARGE_FILE_THRESHOLD:
+                if file_path in self._content_cache:
+                    content, mtime, size = self._content_cache[file_path]
+                    if os.path.getmtime(file_path) == mtime and size == file_size:
+                        return content
+                
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        self._update_cache_size(file_path, content)
+                        self._content_cache[file_path] = (content, os.path.getmtime(file_path), file_size)
+                        return content
+                except UnicodeDecodeError:
+                    with open(file_path, 'r', encoding='latin-1') as f:
+                        content = f.read()
+                        self._update_cache_size(file_path, content)
+                        self._content_cache[file_path] = (content, os.path.getmtime(file_path), file_size)
+                        return content
+            
+            # For large files, use chunk cache and mmap for efficiency
+            if file_path not in self._chunk_cache:
+                self._chunk_cache[file_path] = {}
+            
+            chunks = []
+            for i in range(start_chunk, start_chunk + num_chunks):
+                if i in self._chunk_cache[file_path]:
+                    chunks.append(self._chunk_cache[file_path][i])
+                    continue
+                
+                offset = i * self.CHUNK_SIZE
+                if offset >= file_size:
+                    break
+                
+                try:
+                    with open(file_path, 'rb') as f:
+                        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                            mm.seek(offset)
+                            chunk_bytes = mm.read(self.CHUNK_SIZE)
+                            try:
+                                chunk = chunk_bytes.decode('utf-8')
+                            except UnicodeDecodeError:
+                                chunk = chunk_bytes.decode('latin-1')
+                            self._chunk_cache[file_path][i] = chunk
+                            chunks.append(chunk)
+                except (ValueError, OSError) as e:
+                    self.logger.error(f"Error reading file {file_path} with mmap: {str(e)}")
+                    # Fallback to regular file reading
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        f.seek(offset)
+                        chunk = f.read(self.CHUNK_SIZE)
+                        self._chunk_cache[file_path][i] = chunk
+                        chunks.append(chunk)
+            
+            return ''.join(chunks)
+            
+        except (IOError, UnicodeDecodeError) as e:
+            self.logger.error(f"Error reading file {file_path}: {str(e)}")
+            return ''
+
+    def get_workspace_files(self, workspace_dir: str, query: str = None) -> Dict[str, str]:
+        """Enhanced workspace file retrieval with smart filtering and parallel processing"""
+        start_time = time.time()
+        self.logger.info(f"Getting workspace files for: {workspace_dir}" + (f" with query: {query}" if query else ""))
+        
+        files_content = {}
+        all_files = []
+        
+        try:
+            # Collect all files with parallel processing
+            self.logger.debug("Starting parallel file scan...")
+            all_files = self._parallel_scan(workspace_dir)
+            self.logger.info(f"Found {len(all_files)} files to process")
+            
+            # If no query, only include small files and files in root directory
+            if not query:
+                self.logger.debug("No query provided, selecting root and small files...")
+                for file_path, rel_path in all_files:
+                    try:
+                        if os.path.dirname(rel_path) == '' or os.path.getsize(file_path) < self.LARGE_FILE_THRESHOLD:
+                            content = self._get_file_content(file_path)
+                            if content:
+                                files_content[rel_path] = content
+                                self.logger.debug(f"Added file: {rel_path}")
+                    except Exception as e:
+                        self.logger.warning(f"Could not read file {file_path}: {e}")
+                
+                elapsed_time = time.time() - start_time
+                self.logger.info(f"File collection complete in {elapsed_time:.2f}s. Total files: {len(files_content)}")
+                return files_content
+            
+            # Enhanced scoring system for file relevance
+            self.logger.debug("Starting file relevance scoring...")
+            scored_files = self._score_files(all_files, query)
+            self.logger.info(f"Scored {len(scored_files)} relevant files")
+            
+            # Get top relevant files with parallel content loading
+            top_files = sorted(scored_files, key=lambda x: x[2], reverse=True)[:10]
+            self.logger.debug(f"Selected top {len(top_files)} files for processing")
+            
+            # Load contents in parallel
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                self.logger.debug("Starting parallel content loading...")
+                results = executor.map(self._load_file_content, top_files)
+                for result in results:
+                    if result:
+                        rel_path, content = result
+                        files_content[rel_path] = content
+                        self.logger.debug(f"Loaded content for: {rel_path}")
+            
+            elapsed_time = time.time() - start_time
+            self.logger.info(f"File processing complete in {elapsed_time:.2f}s. Files loaded: {len(files_content)}")
+            return files_content
+            
+        except Exception as e:
+            self.logger.error(f"Error processing workspace files: {str(e)}", exc_info=True)
+            return {}
+
+    def _parallel_scan(self, workspace_dir: str) -> List[Tuple[str, str]]:
+        """Helper method for parallel directory scanning"""
+        def process_directory(dir_path: str) -> List[Tuple[str, str]]:
+            files = []
+            try:
+                with os.scandir(dir_path) as it:
+                    for entry in it:
+                        if entry.is_file() and not entry.name.startswith('.') and \
+                           not entry.name.endswith(tuple(self.SKIP_EXTENSIONS)):
+                            rel_path = os.path.relpath(entry.path, workspace_dir)
+                            if not self._should_ignore(rel_path):
+                                files.append((entry.path, rel_path))
+                        elif entry.is_dir() and not entry.name.startswith('.') and \
+                             entry.name not in self.SKIP_FOLDERS:
+                            files.extend(process_directory(entry.path))
+            except OSError as e:
+                self.logger.error(f"Error scanning directory {dir_path}: {str(e)}")
+            return files
+
+        subdirs = []
+        files = []
+        try:
+            with os.scandir(workspace_dir) as it:
+                for entry in it:
+                    if entry.is_dir() and not entry.name.startswith('.') and \
+                       entry.name not in self.SKIP_FOLDERS:
+                        subdirs.append(entry.path)
+                    elif entry.is_file() and not entry.name.startswith('.') and \
+                         not entry.name.endswith(tuple(self.SKIP_EXTENSIONS)):
+                        rel_path = os.path.relpath(entry.path, workspace_dir)
+                        if not self._should_ignore(rel_path):
+                            files.append((entry.path, rel_path))
+        except OSError as e:
+            self.logger.error(f"Error scanning root directory: {str(e)}")
+        
+        if subdirs:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                subdir_files = list(executor.map(process_directory, subdirs))
+                for subdir_file_list in subdir_files:
+                    files.extend(subdir_file_list)
+        
+        return files
+
+    def _score_files(self, files: List[Tuple[str, str]], query: str) -> List[Tuple[str, str, float]]:
+        """Score files based on relevance to query"""
+        scored_files = []
+        for file_path, rel_path in files:
+            score = 0
+            try:
+                # Check filename relevance
+                if any(term.lower() in rel_path.lower() for term in query.lower().split()):
+                    score += 5
+                    self.logger.debug(f"File {rel_path} matched query in name (+5)")
+                
+                # Quick content scan for relevance
+                try:
+                    with open(file_path, 'rb') as f:
+                        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                            preview = mm.read(4096).decode('utf-8', errors='ignore')
+                            if any(term.lower() in preview.lower() for term in query.lower().split()):
+                                score += 3
+                                self.logger.debug(f"File {rel_path} matched query in content (+3)")
+                except (ValueError, OSError):
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        preview = f.read(4096)
+                        if any(term.lower() in preview.lower() for term in query.lower().split()):
+                            score += 3
+                            self.logger.debug(f"File {rel_path} matched query in content (+3)")
+                
+                # Consider file location and type
+                if os.path.dirname(rel_path) == '':
+                    score += 2
+                    self.logger.debug(f"File {rel_path} is in root directory (+2)")
+                if rel_path.endswith(('.py', '.js', '.html', '.css', '.json', '.yml', '.yaml')):
+                    score += 1
+                    self.logger.debug(f"File {rel_path} is a primary file type (+1)")
+                
+                # Consider indexed symbols if available
+                if file_path in self._file_index:
+                    index = self._file_index[file_path]
+                    for symbol_list in index['symbols'].values():
+                        if any(term.lower() in symbol[1].lower() for term in query.lower().split() for symbol in symbol_list):
+                            score += 2
+                            self.logger.debug(f"File {rel_path} matched query in symbols (+2)")
+                
+                if score > 0:
+                    scored_files.append((file_path, rel_path, score))
+                    self.logger.debug(f"File {rel_path} total score: {score}")
+            except Exception as e:
+                self.logger.warning(f"Could not analyze file {file_path}: {e}")
+        
+        return scored_files
+
+    def _load_file_content(self, file_tuple: Tuple[str, str, float]) -> Optional[Tuple[str, str]]:
+        """Load file content with proper error handling"""
+        file_path, rel_path, _ = file_tuple
+        try:
+            content = self._get_file_content(file_path)
+            if content:
+                self.logger.debug(f"Successfully loaded content for {rel_path}")
+                return rel_path, content
+        except Exception as e:
+            self.logger.warning(f"Could not read file {file_path}: {e}")
+        return None
+
     def _load_gitignore(self):
         """Load .gitignore patterns if the file exists"""
         gitignore_path = os.path.join(self.workspace_root, '.gitignore')
@@ -77,7 +391,6 @@ class WorkspaceManager:
         if not self._gitignore_patterns:
             return False
         
-        import re
         normalized_path = path.replace('\\', '/')
         return any(re.match(pattern, normalized_path) for pattern in self._gitignore_patterns)
     
@@ -88,66 +401,6 @@ class WorkspaceManager:
             return current_mtime == cache_entry[1]
         except OSError:
             return False
-    
-    def _get_file_content(self, file_path: str, start_chunk: int = 0, num_chunks: int = 1) -> str:
-        """Get file content with chunked reading support"""
-        try:
-            file_size = os.path.getsize(file_path)
-            
-            # For small files, read entire content
-            if file_size < self.LARGE_FILE_THRESHOLD:
-                if file_path in self._content_cache:
-                    content, mtime, size = self._content_cache[file_path]
-                    if os.path.getmtime(file_path) == mtime and size == file_size:
-                        return content
-                
-                try:
-                    # Try UTF-8 first
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        self._content_cache[file_path] = (content, os.path.getmtime(file_path), file_size)
-                        return content
-                except UnicodeDecodeError:
-                    # Try latin-1 if UTF-8 fails
-                    with open(file_path, 'r', encoding='latin-1') as f:
-                        content = f.read()
-                        self._content_cache[file_path] = (content, os.path.getmtime(file_path), file_size)
-                        return content
-            
-            # For large files, use chunked reading
-            if file_path not in self._chunk_cache:
-                self._chunk_cache[file_path] = {}
-            
-            chunks = []
-            for i in range(start_chunk, start_chunk + num_chunks):
-                if i in self._chunk_cache[file_path]:
-                    chunks.append(self._chunk_cache[file_path][i])
-                    continue
-                
-                offset = i * self.CHUNK_SIZE
-                if offset >= file_size:
-                    break
-                
-                try:
-                    # Try UTF-8 first
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        f.seek(offset)
-                        chunk = f.read(self.CHUNK_SIZE)
-                        self._chunk_cache[file_path][i] = chunk
-                        chunks.append(chunk)
-                except UnicodeDecodeError:
-                    # Try latin-1 if UTF-8 fails
-                    with open(file_path, 'r', encoding='latin-1') as f:
-                        f.seek(offset)
-                        chunk = f.read(self.CHUNK_SIZE)
-                        self._chunk_cache[file_path][i] = chunk
-                        chunks.append(chunk)
-            
-            return ''.join(chunks)
-            
-        except (IOError, UnicodeDecodeError) as e:
-            print(f"Error reading file {file_path}: {str(e)}")  # Debug log
-            return ''
     
     def get_directory_structure(self, dir_path: str, depth: int = 1) -> List[dict]:
         """Get directory structure with lazy loading support"""
@@ -356,130 +609,59 @@ class WorkspaceManager:
     
     def get_workspace_context(self, workspace_dir: str) -> str:
         """Get a description of the workspace context"""
-        structure = self.get_workspace_structure(workspace_dir)
-        files_content = self.get_workspace_files(workspace_dir)
+        self.logger.info(f"Getting workspace context for: {workspace_dir}")
+        start_time = time.time()
         
-        context = "Workspace Structure:\n"
-        for item in structure:
-            prefix = "📁 " if item['type'] == 'directory' else " "
-            context += f"{prefix}{item['path']}\n"
-        
-        context += "\nFile Relationships and Dependencies:\n"
-        # Analyze imports and dependencies
-        dependencies = self._analyze_dependencies(files_content)
-        for file, deps in dependencies.items():
-            if deps:
-                context += f"{file} depends on: {', '.join(deps)}\n"
-        
-        return context
-    
-    def get_workspace_files(self, workspace_dir: str, query: str = None) -> Dict[str, str]:
-        """Get content of relevant files in workspace based on the query
-        
-        Args:
-            workspace_dir: The workspace directory path
-            query: The user's request/query to determine relevant files
-        """
-        if not os.path.exists(workspace_dir) or not os.path.isdir(workspace_dir):
-            raise ValueError('Invalid workspace directory')
+        try:
+            # Get workspace structure with progress logging
+            self.logger.debug("Fetching workspace structure...")
+            structure = self.get_workspace_structure(workspace_dir)
+            self.logger.debug(f"Found {len(structure)} top-level items in structure")
             
-        files_content = {}
-        
-        # Get all potential files first
-        all_files = []
-        for root, dirs, files in os.walk(workspace_dir):
-            # Skip .git and other ignored directories
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in self.SKIP_FOLDERS]
+            # Get relevant files with size limits and logging
+            self.logger.debug("Fetching workspace files...")
+            files_content = {}
+            total_size = 0
             
-            for file in files:
-                if (not file.endswith('.db') and 
-                    not file.startswith('.') and 
-                    not file.endswith(tuple(self.SKIP_EXTENSIONS))):
+            # Only process files under size threshold
+            for root, _, files in os.walk(workspace_dir):
+                for file in files:
                     file_path = os.path.join(root, file)
-                    rel_path = os.path.relpath(file_path, workspace_dir)
-                    # Skip if path matches gitignore patterns
-                    if not self._should_ignore(rel_path):
-                        all_files.append((file_path, rel_path))
-
-        # If no query, only include small files and files in root directory
-        if not query:
-            for file_path, rel_path in all_files:
-                try:
-                    if os.path.dirname(rel_path) == '' or os.path.getsize(file_path) < 50 * 1024:  # Root dir or < 50KB
-                        content = self._get_file_content(file_path)
-                        if content:
-                            files_content[rel_path] = content
-                except Exception as e:
-                    print(f"Warning: Could not read file {file_path}: {e}")
-            return files_content
-
-        # Score files based on relevance to query
-        scored_files = []
-        for file_path, rel_path in all_files:
-            score = 0
-            try:
-                # Check filename relevance
-                if any(term.lower() in rel_path.lower() for term in query.lower().split()):
-                    score += 5
-
-                # Quick content scan for relevance
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        preview = f.read(4096)  # Read first 4KB for preview
-                        if any(term.lower() in preview.lower() for term in query.lower().split()):
-                            score += 3
-                except UnicodeDecodeError:
-                    pass  # Skip binary files
-
-                # Consider file location
-                if os.path.dirname(rel_path) == '':  # Root directory
-                    score += 2
-                
-                # Consider file type
-                if rel_path.endswith(('.py', '.js', '.html', '.css', '.json', '.yml', '.yaml')):
-                    score += 1
-
-                if score > 0:
-                    scored_files.append((file_path, rel_path, score))
-            except Exception as e:
-                print(f"Warning: Could not analyze file {file_path}: {e}")
-
-        # Sort by score and get top relevant files
-        for file_path, rel_path, _ in sorted(scored_files, key=lambda x: x[2], reverse=True)[:10]:
-            try:
-                content = self._get_file_content(file_path)
-                if content:
-                    files_content[rel_path] = content
-            except Exception as e:
-                print(f"Warning: Could not read file {file_path}: {e}")
-
-        return files_content
-    
-    def _analyze_dependencies(self, files_content: Dict[str, str]) -> Dict[str, Set[str]]:
-        """Analyze file dependencies based on imports and references"""
-        dependencies = {}
-        import_patterns = {
-            '.py': ['import ', 'from '],
-            '.js': ['import ', 'require('],
-            '.html': ['<script src=', '<link href='],
-        }
-        
-        for file_path, content in files_content.items():
-            ext = os.path.splitext(file_path)[1]
-            deps = set()
+                    try:
+                        if os.path.getsize(file_path) < self.LARGE_FILE_THRESHOLD:
+                            rel_path = os.path.relpath(file_path, workspace_dir)
+                            if not self._should_ignore(rel_path):
+                                content = self._get_file_content(file_path)
+                                if content:
+                                    files_content[rel_path] = content
+                                    total_size += len(content.encode('utf-8'))
+                                    self.logger.debug(f"Added {rel_path} to context (size: {len(content)} chars)")
+                    except OSError as e:
+                        self.logger.warning(f"Error processing file {file_path}: {e}")
             
-            if ext in import_patterns:
-                lines = content.split('\n')
-                for line in lines:
-                    for pattern in import_patterns[ext]:
-                        if pattern in line:
-                            # Extract dependency name (simplified)
-                            dep = line.split(pattern)[-1].split()[0].strip('"\';')
-                            deps.add(dep)
+            # Build context string with structure
+            context = "Workspace Structure:\n"
+            for item in structure:
+                prefix = "📁 " if item['type'] == 'directory' else " "
+                context += f"{prefix}{item['path']}\n"
             
-            dependencies[file_path] = deps
-        
-        return dependencies 
+            # Add dependencies if files were processed
+            if files_content:
+                context += "\nFile Relationships and Dependencies:\n"
+                dependencies = self._analyze_dependencies(files_content)
+                for file, deps in dependencies.items():
+                    if deps:
+                        context += f"{file} depends on: {', '.join(deps)}\n"
+            
+            elapsed_time = time.time() - start_time
+            self.logger.info(f"Context generation complete in {elapsed_time:.2f}s")
+            self.logger.info(f"Context size: {len(context)} chars, Files processed: {len(files_content)}")
+            
+            return context
+            
+        except Exception as e:
+            self.logger.error(f"Error generating workspace context: {str(e)}", exc_info=True)
+            return f"Error generating context: {str(e)}"
     
     def process_operations(self, operations: List[dict], workspace_dir: str) -> List[dict]:
         """Process and validate operations, adding diffs for changes
