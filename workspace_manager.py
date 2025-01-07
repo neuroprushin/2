@@ -10,13 +10,11 @@ import hashlib
 from collections import defaultdict, Counter
 import threading
 from concurrent.futures import ThreadPoolExecutor
-import tempfile
 import subprocess
 import logging
 import time
-import numpy as np
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 @dataclass
 class Document:

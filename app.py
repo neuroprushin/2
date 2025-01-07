@@ -1,11 +1,9 @@
 import os
 import json
 import shutil
-import tempfile
 import re
 from datetime import datetime
 from pathlib import Path
-import difflib
 import time
 
 import eventlet
