@@ -541,21 +541,11 @@ def process_prompt():
             if os.path.exists(full_path):
                 if os.path.isfile(full_path):
                     # For a file, get its content directly
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        files_content = {context_path: f.read()}
+                    content = workspace_manager._get_file_content(full_path)
+                    files_content = {context_path: content} if content else {}
                 else:
                     # For a directory, get contents of files within it
-                    files_content = {}
-                    for root, _, files in os.walk(full_path):
-                        for file in files:
-                            if not file.startswith('.') and not file.endswith(tuple(workspace_manager.SKIP_EXTENSIONS)):
-                                file_path = os.path.join(root, file)
-                                rel_path = os.path.relpath(file_path, workspace_dir)
-                                try:
-                                    with open(file_path, 'r', encoding='utf-8') as f:
-                                        files_content[rel_path] = f.read()
-                                except Exception as e:
-                                    print(f"Error reading file {file_path}: {e}")
+                    files_content = workspace_manager.get_workspace_files(full_path)
         else:
             # No context path, get relevant files based on the query
             files_content = workspace_manager.get_workspace_files(workspace_dir, query=prompt)
@@ -658,62 +648,18 @@ def get_file_content():
                 'truncated': False
             })
         
-        # Get file size
-        try:
-            file_size = os.path.getsize(full_path)
-            print(f"File size for {full_path}: {file_size} bytes")  # Debug log
-        except OSError as e:
-            print(f"Error getting file size: {str(e)}")  # Debug log
-            file_size = 0
+        # Use workspace manager to get file content
+        content = workspace_manager._get_file_content(full_path)
+        file_size = os.path.getsize(full_path)
+        is_large = workspace_manager.is_large_file(full_path)
         
-        # Check if it's a large file
-        if is_large_file(full_path):
-            preview_content = get_file_preview(full_path)
-            print(f"Large file preview length: {len(preview_content)}")  # Debug log
-            return jsonify({
-                'status': 'success',
-                'content': preview_content,
-                'truncated': True,
-                'file_size': file_size
-            })
-        
-        content = None
-        try:
-            # Try UTF-8 first
-            with open(full_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                print(f"File content length (UTF-8): {len(content)}")  # Debug log
-        except UnicodeDecodeError:
-            try:
-                # Try with latin-1 encoding if UTF-8 fails
-                with open(full_path, 'r', encoding='latin-1') as f:
-                    content = f.read()
-                    print(f"File content length (latin-1): {len(content)}")  # Debug log
-            except Exception as e:
-                print(f"Error reading file with latin-1: {str(e)}")  # Debug log
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Could not read file: invalid encoding'
-                }), 500
-        except Exception as e:
-            print(f"Error reading file with UTF-8: {str(e)}")  # Debug log
-            return jsonify({
-                'status': 'error',
-                'message': f'Could not read file: {str(e)}'
-            }), 500
-            
-        if content is None:
-            return jsonify({
-                'status': 'error',
-                'message': 'Could not read file content'
-            }), 500
-            
         return jsonify({
             'status': 'success',
             'content': content,
-            'truncated': False,
+            'truncated': is_large,
             'file_size': file_size
         })
+            
     except Exception as e:
         print(f"Error in get_file_content: {str(e)}")  # Debug log
         return jsonify({

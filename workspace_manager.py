@@ -1134,3 +1134,10 @@ class WorkspaceManager:
                 return '\n'.join(lines[:10] + 
                                [f'\n... truncated {len(lines) - 20} lines ...\n'] +
                                lines[-10:]) 
+
+    def is_large_file(self, file_path: str) -> bool:
+        """Check if a file is considered large based on LARGE_FILE_THRESHOLD"""
+        try:
+            return os.path.getsize(file_path) > self.LARGE_FILE_THRESHOLD
+        except OSError:
+            return False 
