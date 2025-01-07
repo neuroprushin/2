@@ -7,13 +7,162 @@ import mmap
 from pathlib import Path
 import re
 import hashlib
-from collections import defaultdict
+from collections import defaultdict, Counter
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import subprocess
 import logging
 import time
+import numpy as np
+from dataclasses import dataclass
+import math
+
+@dataclass
+class Document:
+    path: str
+    content: str
+    term_freqs: Counter
+    length: int
+
+class BM25Search:
+    def __init__(self, k1: float = 1.5, b: float = 0.75):
+        self.k1 = k1  # Term frequency scaling parameter
+        self.b = b    # Length normalization parameter
+        self.documents: Dict[str, Document] = {}
+        self.avg_doc_length: float = 0
+        self.total_docs: int = 0
+        self.idf_cache: Dict[str, float] = {}
+        self.tokenizer_pattern = re.compile(r'\w+|[^\w\s]')
+        self._lock = threading.Lock()
+        
+        # Initialize logging
+        self.logger = logging.getLogger('BM25Search')
+        self.logger.setLevel(logging.DEBUG)
+    
+    def preprocess(self, text: str) -> List[str]:
+        """Tokenize and normalize text"""
+        # Convert to lowercase and tokenize
+        tokens = self.tokenizer_pattern.findall(text.lower())
+        # Filter out single character tokens except if they're special characters
+        return [t for t in tokens if len(t) > 1 or not t.isalnum()]
+    
+    def add_document(self, path: str, content: str) -> None:
+        """Add a document to the search index"""
+        with self._lock:
+            # Preprocess content
+            tokens = self.preprocess(content)
+            # Create document object
+            doc = Document(
+                path=path,
+                content=content,
+                term_freqs=Counter(tokens),
+                length=len(tokens)
+            )
+            
+            # Update index
+            self.documents[path] = doc
+            
+            # Update average document length
+            self.total_docs = len(self.documents)
+            total_length = sum(doc.length for doc in self.documents.values())
+            self.avg_doc_length = total_length / self.total_docs if self.total_docs > 0 else 0
+            
+            # Clear IDF cache as it needs to be recalculated
+            self.idf_cache.clear()
+    
+    def remove_document(self, path: str) -> None:
+        """Remove a document from the search index"""
+        with self._lock:
+            if path in self.documents:
+                del self.documents[path]
+                self.total_docs = len(self.documents)
+                if self.total_docs > 0:
+                    total_length = sum(doc.length for doc in self.documents.values())
+                    self.avg_doc_length = total_length / self.total_docs
+                else:
+                    self.avg_doc_length = 0
+                self.idf_cache.clear()
+    
+    def _calculate_idf(self, term: str) -> float:
+        """Calculate Inverse Document Frequency for a term"""
+        if term in self.idf_cache:
+            return self.idf_cache[term]
+        
+        # Count documents containing the term
+        doc_freq = sum(1 for doc in self.documents.values() if term in doc.term_freqs)
+        
+        # Calculate IDF with smoothing
+        idf = math.log(1 + (self.total_docs - doc_freq + 0.5) / (doc_freq + 0.5))
+        self.idf_cache[term] = idf
+        return idf
+    
+    def search(self, query: str, top_k: int = 10) -> List[Tuple[str, float, str]]:
+        """Search for documents matching the query"""
+        start_time = time.time()
+        self.logger.debug(f"Starting search for query: {query}")
+        
+        # Preprocess query
+        query_terms = self.preprocess(query)
+        scores: Dict[str, float] = defaultdict(float)
+        
+        # Calculate scores for each document
+        for path, doc in self.documents.items():
+            score = 0.0
+            doc_len_norm = (1 - self.b + self.b * (doc.length / self.avg_doc_length))
+            
+            for term in query_terms:
+                if term in doc.term_freqs:
+                    tf = doc.term_freqs[term]
+                    idf = self._calculate_idf(term)
+                    
+                    # BM25 scoring formula
+                    term_score = (idf * tf * (self.k1 + 1) / 
+                                (tf + self.k1 * doc_len_norm))
+                    score += term_score
+            
+            if score > 0:
+                scores[path] = score
+        
+        # Sort results by score
+        results = []
+        for path, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_k]:
+            doc = self.documents[path]
+            # Get a relevant snippet from the content
+            snippet = self._get_relevant_snippet(doc.content, query_terms)
+            results.append((path, score, snippet))
+        
+        elapsed_time = time.time() - start_time
+        self.logger.info(f"Search completed in {elapsed_time:.3f}s, found {len(results)} results")
+        return results
+    
+    def _get_relevant_snippet(self, content: str, query_terms: List[str], 
+                            snippet_size: int = 200) -> str:
+        """Extract a relevant snippet from the content containing query terms"""
+        # Find the best window containing query terms
+        lines = content.split('\n')
+        best_score = 0
+        best_snippet = ''
+        
+        for i in range(len(lines)):
+            window = ' '.join(lines[max(0, i-2):min(len(lines), i+3)])
+            if len(window) > snippet_size * 2:
+                continue
+            
+            score = sum(1 for term in query_terms if term.lower() in window.lower())
+            if score > best_score:
+                best_score = score
+                best_snippet = window
+        
+        if not best_snippet and lines:
+            # Fallback to first few lines if no relevant snippet found
+            best_snippet = ' '.join(lines[:5])
+        
+        # Truncate and add ellipsis if needed
+        if len(best_snippet) > snippet_size:
+            best_snippet = best_snippet[:snippet_size] + '...'
+        
+        return best_snippet
 
 class WorkspaceManager:
     # File size thresholds and constants
@@ -54,22 +203,50 @@ class WorkspaceManager:
         self.workspace_root = workspace_root
         os.makedirs(workspace_root, exist_ok=True)
         
+        # Initialize enhanced logging
+        self.logger = logging.getLogger('WorkspaceManager')
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Create handlers
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        
+        # Create file handler
+        log_file = os.path.join(workspace_root, 'workspace_manager.log')
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.DEBUG)
+        
+        # Create formatters and add it to handlers
+        console_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s')
+        
+        console_handler.setFormatter(console_format)
+        file_handler.setFormatter(file_format)
+        
+        # Add handlers to the logger
+        self.logger.addHandler(console_handler)
+        self.logger.addHandler(file_handler)
+        
+        self.logger.info(f"Initializing WorkspaceManager with root: {workspace_root}")
+        
+        # Initialize BM25 search
+        self.search_index = BM25Search()
+        self.logger.info("Initialized BM25 search index")
+        
         # Enhanced caching system with LRU and size tracking
-        self._content_cache: Dict[str, Tuple[str, float, int]] = {}  # path -> (content, mtime, size)
-        self._structure_cache: Dict[str, Tuple[List[dict], float]] = {}  # workspace -> (structure, mtime)
-        self._chunk_cache: Dict[str, Dict[int, str]] = {}  # path -> {chunk_index: content}
-        self._symbol_cache: Dict[str, Dict[str, List[Tuple[int, str]]]] = {}  # path -> {symbol_type -> [(line_num, symbol)]}
-        self._dependency_graph: Dict[str, Set[str]] = defaultdict(set)  # file -> {dependent_files}
-        self._file_index: Dict[str, Dict[str, Any]] = {}  # path -> metadata
+        self._content_cache: Dict[str, Tuple[str, float, int]] = {}
+        self._structure_cache: Dict[str, Tuple[List[dict], float]] = {}
+        self._chunk_cache: Dict[str, Dict[int, str]] = {}
+        self._symbol_cache: Dict[str, Dict[str, List[Tuple[int, str]]]] = {}
+        self._dependency_graph: Dict[str, Set[str]] = defaultdict(set)
+        self._file_index: Dict[str, Dict[str, Any]] = {}
         self._cache_size = 0
         self._cache_lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=4)
         self._gitignore_patterns: List[str] = []
-        self._load_gitignore()
         
-        # Initialize logging
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger('WorkspaceManager')
+        self.logger.debug("Initialized caching systems and thread pool")
+        self._load_gitignore()
         
     def _update_cache_size(self, path: str, content: str, is_add: bool = True):
         """Track cache size with thread safety"""
@@ -141,12 +318,14 @@ class WorkspaceManager:
         """Enhanced file content retrieval with chunked reading and caching"""
         try:
             file_size = os.path.getsize(file_path)
+            self.logger.debug(f"Reading file {file_path} (size: {file_size} bytes)")
             
             # For small files, use content cache
             if file_size < self.LARGE_FILE_THRESHOLD:
                 if file_path in self._content_cache:
                     content, mtime, size = self._content_cache[file_path]
                     if os.path.getmtime(file_path) == mtime and size == file_size:
+                        self.logger.debug(f"Cache hit for {file_path}")
                         return content
                 
                 try:
@@ -154,12 +333,32 @@ class WorkspaceManager:
                         content = f.read()
                         self._update_cache_size(file_path, content)
                         self._content_cache[file_path] = (content, os.path.getmtime(file_path), file_size)
+                        
+                        # Add to search index if it's a new file
+                        if file_path not in self.search_index.documents:
+                            try:
+                                rel_path = os.path.relpath(file_path, self.workspace_root)
+                                self.search_index.add_document(rel_path, content)
+                                self.logger.debug(f"Added {rel_path} to search index")
+                            except Exception as e:
+                                self.logger.warning(f"Failed to add {file_path} to search index: {e}")
+                        
                         return content
                 except UnicodeDecodeError:
                     with open(file_path, 'r', encoding='latin-1') as f:
                         content = f.read()
                         self._update_cache_size(file_path, content)
                         self._content_cache[file_path] = (content, os.path.getmtime(file_path), file_size)
+                        
+                        # Add to search index if it's a new file
+                        if file_path not in self.search_index.documents:
+                            try:
+                                rel_path = os.path.relpath(file_path, self.workspace_root)
+                                self.search_index.add_document(rel_path, content)
+                                self.logger.debug(f"Added {rel_path} to search index")
+                            except Exception as e:
+                                self.logger.warning(f"Failed to add {file_path} to search index: {e}")
+                        
                         return content
             
             # For large files, use chunk cache and mmap for efficiency
@@ -196,7 +395,18 @@ class WorkspaceManager:
                         self._chunk_cache[file_path][i] = chunk
                         chunks.append(chunk)
             
-            return ''.join(chunks)
+            content = ''.join(chunks)
+            
+            # Add to search index if it's a new file
+            if content and file_path not in self.search_index.documents:
+                try:
+                    rel_path = os.path.relpath(file_path, self.workspace_root)
+                    self.search_index.add_document(rel_path, content)
+                    self.logger.debug(f"Added {rel_path} to search index")
+                except Exception as e:
+                    self.logger.warning(f"Failed to add {file_path} to search index: {e}")
+            
+            return content
             
         except (IOError, UnicodeDecodeError) as e:
             self.logger.error(f"Error reading file {file_path}: {str(e)}")
@@ -847,3 +1057,8 @@ class WorkspaceManager:
                 processed.append(operation)
                 
         return processed 
+
+    def search_codebase(self, query: str, top_k: int = 10) -> List[Tuple[str, float, str]]:
+        """Search the codebase using BM25"""
+        self.logger.info(f"Searching codebase for: {query}")
+        return self.search_index.search(query, top_k) 
