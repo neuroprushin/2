@@ -938,6 +938,10 @@ class WorkspaceManager:
                             new_text = change['new'].rstrip('\n')
                             new_content = new_content.replace(old_text, new_text)
                     
+                    # Ensure both contents end with exactly one newline
+                    current_content = current_content.rstrip('\n') + '\n'
+                    new_content = new_content.rstrip('\n') + '\n'
+                    
                     # Generate diff with proper header formatting
                     diff = [
                         f'--- a/{operation["path"]}\n',
@@ -956,8 +960,10 @@ class WorkspaceManager:
                     next(diff_content)  # Skip first header
                     next(diff_content)  # Skip second header
                     
-                    # Add the rest of the diff content
-                    diff.extend(diff_content)
+                    # Add the rest of the diff content, filtering out empty added/removed lines
+                    filtered_content = [line for line in diff_content 
+                                     if not (line.startswith('+') or line.startswith('-')) or line.strip() not in ('+', '-')]
+                    diff.extend(filtered_content)
                     operation['diff'] = ''.join(diff)
                     
                     # Run linter on Python files
