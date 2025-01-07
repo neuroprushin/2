@@ -68,38 +68,70 @@ class WorkspaceManager:
         self._content_cache: Dict[str, Tuple[str, float, int]] = {}  # path -> (content, mtime, size)
         self._structure_cache: Dict[str, Tuple[List[dict], float]] = {}  # workspace -> (structure, mtime)
         self._chunk_cache: Dict[str, Dict[int, str]] = {}  # path -> {chunk_index: content}
-        self._gitignore_patterns: List[str] = []
-        self._load_gitignore()
+        self._gitignore_patterns: Dict[str, List[str]] = {}  # dir -> patterns
+        self._load_gitignore(workspace_root)
         
-    def _load_gitignore(self):
-        """Load .gitignore patterns if the file exists"""
-        gitignore_path = os.path.join(self.workspace_root, '.gitignore')
-        if os.path.exists(gitignore_path):
-            try:
-                with open(gitignore_path, 'r') as f:
+    def _load_gitignore(self, directory: str):
+        """Load .gitignore patterns recursively from directory and its parents"""
+        try:
+            current_dir = directory
+            while True:
+                gitignore_path = os.path.join(current_dir, '.gitignore')
+                if os.path.exists(gitignore_path):
                     patterns = []
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            # Convert glob patterns to regex patterns
-                            pattern = line.replace('.', r'\.').replace('*', '.*').replace('?', '.')
-                            if not line.startswith('/'):
-                                pattern = f'.*{pattern}'
-                            if not line.endswith('/'):
-                                pattern = f'{pattern}($|/.*)'
-                            patterns.append(pattern)
-                    self._gitignore_patterns = patterns
-            except Exception as e:
-                print(f"Warning: Could not read .gitignore file: {e}")
-
-    def _should_ignore(self, path: str) -> bool:
+                    with open(gitignore_path, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                # Convert glob patterns to regex patterns
+                                pattern = line.replace('.', r'\.').replace('*', '.*').replace('?', '.')
+                                if not line.startswith('/'):
+                                    pattern = f'.*{pattern}'
+                                if not line.endswith('/'):
+                                    pattern = f'{pattern}($|/.*)'
+                                patterns.append(pattern)
+                    self._gitignore_patterns[current_dir] = patterns
+                
+                # Stop at workspace root
+                if os.path.abspath(current_dir) == os.path.abspath(self.workspace_root):
+                    break
+                parent_dir = os.path.dirname(current_dir)
+                if parent_dir == current_dir:  # Reached root
+                    break
+                current_dir = parent_dir
+                
+        except Exception as e:
+            print(f"Warning: Error loading .gitignore files: {e}")
+    
+    def _should_ignore(self, path: str, base_dir: str = None) -> bool:
         """Check if a path should be ignored based on gitignore patterns"""
-        if not self._gitignore_patterns:
-            return False
-        
         import re
+        
+        if base_dir is None:
+            base_dir = self.workspace_root
+            
+        # First check if any parent directory should be ignored
+        current_dir = os.path.dirname(os.path.join(base_dir, path))
+        while current_dir and os.path.abspath(current_dir) >= os.path.abspath(self.workspace_root):
+            rel_dir = os.path.relpath(current_dir, self.workspace_root)
+            if rel_dir == '.':
+                rel_dir = ''
+            dir_name = os.path.basename(current_dir)
+            
+            # Check if directory itself should be skipped
+            if dir_name.startswith('.') or dir_name in self.SKIP_FOLDERS:
+                return True
+                
+            current_dir = os.path.dirname(current_dir)
+        
+        # Then check gitignore patterns
         normalized_path = path.replace('\\', '/')
-        return any(re.match(pattern, normalized_path) for pattern in self._gitignore_patterns)
+        for dir_path, patterns in self._gitignore_patterns.items():
+            if os.path.abspath(base_dir).startswith(os.path.abspath(dir_path)):
+                if any(re.match(pattern, normalized_path) for pattern in patterns):
+                    return True
+        
+        return False
     
     def _is_cache_valid(self, path: str, cache_entry: Tuple[Union[str, List[dict]], float]) -> bool:
         """Check if cached content is still valid"""
@@ -394,27 +426,28 @@ class WorkspaceManager:
         return context
     
     def get_workspace_files(self, workspace_dir: str, query: str = None) -> Dict[str, str]:
-        """Get contents of relevant files in the workspace.
-        
-        Args:
-            workspace_dir: Path to workspace directory
-            query: Optional query to filter relevant files
-            
-        Returns:
-            Dictionary mapping file paths to their contents
-        """
+        """Get contents of relevant files in the workspace."""
         files_content = {}
         total_size = 0
         
-        for root, _, files in os.walk(workspace_dir):
+        for root, dirs, files in os.walk(workspace_dir):
+            # Filter out ignored directories
+            dirs[:] = [d for d in dirs if not (d.startswith('.') or 
+                                             d in self.SKIP_FOLDERS or 
+                                             self._should_ignore(d, root))]
+            
             for file in files:
-                # Skip hidden files, specified extensions, and binary files
-                if (file.startswith('.') or 
-                    file.endswith(tuple(self.SKIP_EXTENSIONS))):
+                # Skip hidden files and specified extensions
+                if file.startswith('.') or any(file.endswith(ext) for ext in self.SKIP_EXTENSIONS):
                     continue
                     
                 file_path = os.path.join(root, file)
                 rel_path = os.path.relpath(file_path, workspace_dir)
+                
+                # Skip if path matches gitignore patterns
+                if self._should_ignore(rel_path, workspace_dir):
+                    print(f"Skipping ignored file: {rel_path}")
+                    continue
                 
                 # Skip binary files
                 if self.is_binary_file(file_path):
