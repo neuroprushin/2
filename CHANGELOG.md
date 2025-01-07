@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.9] - 2025-01-06
+
+### Added
+- Native Windows support for all features
+- Parallel processing of file operations for improved performance
+- Retry mechanism for more reliable model responses
+- Better error handling and validation throughout the application
+
+### Fixed
+- Diff functionality now works correctly on Windows
+- Path handling issues on Windows resolved
+- Empty string validation in file operations
+- Intermittent issues with parallel processing
+
+### Changed
+- Improved file operation validation logic
+- Enhanced error messages for better debugging
+- Optimized parallel processing for better reliability
+- Updated path normalization for cross-platform compatibility
+
+### Notes
+- Windows users need to run the application as administrator when importing folders
+- All other features work without elevated privileges on Windows
+- WSL2 users can continue using the application as before
+
+### Technical Details
+- Implemented proper Windows path normalization
+- Added retry logic for model API calls
+- Improved validation in process_operations
+- Enhanced merge_suggestions for better parallel operation handling
+- Fixed empty string handling in file changes
+
 ## [0.0.8] - 2024-01-09
 
 ### Added

@@ -115,10 +115,11 @@ Their contributions have been instrumental in making J.A.R.V.I.S. better.
 ## Platform Compatibility
 
 This application has been tested and confirmed working on:
-- Linux (native)
-- Windows Subsystem for Linux (WSL 2)
+- Linux
+- macOS
+- Windows
 
-For best results, we recommend running the application in one of these environments.
+For best results on Windows, run the application as Administrator when importing folders. All other features work without elevated privileges.
 
 ## License
 
