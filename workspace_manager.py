@@ -494,15 +494,25 @@ class WorkspaceManager:
                 # First validate the operation content before cleaning paths
                 if operation['type'] == 'edit_file':
                     changes = operation.get('changes', [])
-                    for change in changes:
-                        if 'old' in change and 'new' in change:
-                            # Validate that both old and new fields are complete
-                            if not change['old'].strip() or not change['new'].strip():
-                                raise ValueError(f"Incomplete change detected in {operation.get('path', 'unknown file')}")
+                    if not changes:
+                        raise ValueError(f"No changes specified for edit operation on {operation.get('path', 'unknown file')}")
+                    
+                    for i, change in enumerate(changes):
+                        if not isinstance(change, dict):
+                            raise ValueError(f"Invalid change format at index {i} in {operation.get('path', 'unknown file')}")
+                        
+                        if 'old' not in change or 'new' not in change:
+                            raise ValueError(f"Change at index {i} missing 'old' or 'new' field in {operation.get('path', 'unknown file')}")
+                        
+                        # For edit operations, at least one of old or new must be non-empty
+                        if not change['old'].strip() and not change['new'].strip():
+                            raise ValueError(f"Change at index {i} has empty 'old' and 'new' content in {operation.get('path', 'unknown file')}")
+                
                 elif operation['type'] == 'create_file':
-                    # Validate content field is complete
-                    if not operation.get('content', '').strip():
-                        raise ValueError(f"Empty or incomplete content for {operation.get('path', 'unknown file')}")
+                    # For create operations, only validate if the file doesn't exist
+                    file_path = os.path.join(workspace_dir, operation['path'])
+                    if not os.path.exists(file_path) and not operation.get('content', '').strip():
+                        raise ValueError(f"Empty or incomplete content for new file {operation.get('path', 'unknown file')}")
 
                 # After validation, clean the paths for processing
                 if 'path' in operation:
