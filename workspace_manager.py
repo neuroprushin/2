@@ -541,16 +541,32 @@ class WorkspaceManager:
                     new_content = current_content
                     for change in changes:
                         if 'old' in change and 'new' in change:
-                            new_content = new_content.replace(change['old'], change['new'])
+                            # Ensure we're not adding extra newlines during replacement
+                            old_text = change['old'].rstrip('\n')
+                            new_text = change['new'].rstrip('\n')
+                            new_content = new_content.replace(old_text, new_text)
                     
-                    diff = unified_diff(
-                        current_content.splitlines(),
-                        new_content.splitlines(),
-                        fromfile=f'a/{operation["path"]}',
-                        tofile=f'b/{operation["path"]}',
-                        lineterm=''
+                    # Generate diff with proper header formatting
+                    diff = [
+                        f'--- a/{operation["path"]}\n',
+                        f'+++ b/{operation["path"]}\n'
+                    ]
+                    
+                    # Get the diff content
+                    diff_content = unified_diff(
+                        current_content.splitlines(keepends=True),
+                        new_content.splitlines(keepends=True),
+                        fromfile='',  # Empty since we handle headers separately
+                        tofile='',
+                        lineterm='\n'  # Add newline to each line including hunk header
                     )
-                    operation['diff'] = '\n'.join(line for line in diff if line)
+                    # Skip the first two lines (headers) from unified_diff
+                    next(diff_content)  # Skip first header
+                    next(diff_content)  # Skip second header
+                    
+                    # Add the rest of the diff content
+                    diff.extend(diff_content)
+                    operation['diff'] = ''.join(diff)
                     
                     # Run linter on Python files
                     if operation['path'].endswith('.py'):
