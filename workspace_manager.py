@@ -434,7 +434,8 @@ class WorkspaceManager:
                         if os.path.dirname(rel_path) == '' or os.path.getsize(file_path) < self.LARGE_FILE_THRESHOLD:
                             content = self._get_file_content(file_path)
                             if content:
-                                files_content[rel_path] = content
+                                # Truncate content for context
+                                files_content[rel_path] = self._truncate_content_for_context(content)
                                 self.logger.debug(f"Added file: {rel_path}")
                     except Exception as e:
                         self.logger.warning(f"Could not read file {file_path}: {e}")
@@ -459,7 +460,8 @@ class WorkspaceManager:
                 for result in results:
                     if result:
                         rel_path, content = result
-                        files_content[rel_path] = content
+                        # Truncate content for context
+                        files_content[rel_path] = self._truncate_content_for_context(content)
                         self.logger.debug(f"Loaded content for: {rel_path}")
             
             elapsed_time = time.time() - start_time
@@ -1068,3 +1070,69 @@ class WorkspaceManager:
         """Search the codebase using BM25"""
         self.logger.info(f"Searching codebase for: {query}")
         return self.search_index.search(query, top_k) 
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Estimate the number of tokens in a text.
+        This is a rough estimate - actual token count may vary by model."""
+        # Average English word length is 4.7 characters
+        # Average token is about 4 characters
+        # So we estimate 1 token per 4 characters
+        return len(text) // 4
+
+    def _truncate_content_for_context(self, content: str, max_tokens: int = 60000) -> str:
+        """Truncate file content while preserving important parts and staying within token limit.
+        
+        Args:
+            content: The file content to truncate
+            max_tokens: Maximum number of tokens to allow
+            
+        Returns:
+            Truncated content with summary
+        """
+        # First check if we're already under the limit
+        if self._estimate_tokens(content) <= max_tokens:
+            return content
+            
+        lines = content.splitlines()
+        
+        # Start with smaller chunks and increase if needed
+        keep_start = 50
+        keep_end = 50
+        remaining_lines = 100
+        
+        while True:
+            # Get the first section
+            truncated = lines[:keep_start]
+            
+            # Get evenly spaced lines from middle section
+            middle_start = keep_start
+            middle_end = len(lines) - keep_end
+            middle_lines = lines[middle_start:middle_end]
+            
+            if middle_lines:
+                # Calculate step size to get remaining_lines number of lines
+                step = len(middle_lines) // remaining_lines
+                if step > 1:
+                    truncated.append(f'\n... truncated {step} lines ...\n')
+                    truncated.extend(middle_lines[::step][:remaining_lines])
+                    truncated.append(f'\n... truncated {step} lines ...\n')
+                else:
+                    truncated.extend(middle_lines[:remaining_lines])
+            
+            # Add the last section
+            truncated.extend(lines[-keep_end:])
+            
+            result = '\n'.join(truncated)
+            if self._estimate_tokens(result) <= max_tokens:
+                return result
+                
+            # If still too large, reduce the number of lines we keep
+            if keep_start > 10:
+                keep_start -= 10
+                keep_end -= 10
+                remaining_lines = max(20, remaining_lines - 20)
+            else:
+                # If we can't reduce further, return a minimal version
+                return '\n'.join(lines[:10] + 
+                               [f'\n... truncated {len(lines) - 20} lines ...\n'] +
+                               lines[-10:]) 
