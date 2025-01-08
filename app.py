@@ -836,6 +836,12 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         print("\n=== Step 1: Preparing Chat Request ===")
         print(f"Model: {model_id}")
         
+        # Create messages array for the chat
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message}
+        ]
+        
         # Estimate tokens in messages
         system_tokens = len(system_message.encode('utf-8')) // 4  # Rough estimate
         user_tokens = len(user_message.encode('utf-8')) // 4
@@ -852,6 +858,7 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                     system_message, 
                     max_tokens=available_tokens
                 )
+                messages[0]["content"] = system_message  # Update truncated message
                 print(f"Truncated system message to fit within {available_tokens} tokens")
             else:
                 raise Exception("Message too long even after truncation")
@@ -880,12 +887,32 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
             text = response.content[0].text
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
             print(f"Response length: {len(text)} characters")
-        else:
-            # For Gemini, use the Google AI client
-            if model_id == 'gemini':
-                try:
-                    model = client.GenerativeModel(model_config['models']['chat'])
-                    chat = model.start_chat(history=[])
+        elif model_id == 'gemini':
+            # Use the Google AI client
+            try:
+                model = client.GenerativeModel(model_config['models']['chat'])
+                chat = model.start_chat(history=[])
+                response = chat.send_message(
+                    f"{system_message}\n\nUser request: {user_message}",
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.7,
+                        candidate_count=1,
+                        max_output_tokens=4096
+                    )
+                )
+                if not response or not response.text:
+                    raise Exception("Empty response from Gemini")
+                text = response.text
+                print(f"\nResponse received in {time.time() - start_time:.1f}s")
+                print(f"Response length: {len(text)} characters")
+            except Exception as e:
+                error_msg = str(e)
+                if "maximum context length" in error_msg.lower():
+                    # Try again with more aggressive truncation
+                    system_message = workspace_manager._truncate_content_for_context(
+                        system_message, 
+                        max_tokens=15000  # Even more conservative limit
+                    )
                     response = chat.send_message(
                         f"{system_message}\n\nUser request: {user_message}",
                         generation_config=genai.types.GenerationConfig(
@@ -895,79 +922,57 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                         )
                     )
                     if not response or not response.text:
-                        raise Exception("Empty response from Gemini")
+                        raise Exception("Empty response from Gemini after truncation")
                     text = response.text
-                    print(f"\nResponse received in {time.time() - start_time:.1f}s")
-                    print(f"Response length: {len(text)} characters")
-                except Exception as e:
-                    error_msg = str(e)
-                    if "maximum context length" in error_msg.lower():
-                        # Try again with more aggressive truncation
-                        system_message = workspace_manager._truncate_content_for_context(
-                            system_message, 
-                            max_tokens=15000  # Even more conservative limit
-                        )
-                        response = chat.send_message(
-                            f"{system_message}\n\nUser request: {user_message}",
-                            generation_config=genai.types.GenerationConfig(
-                                temperature=0.7,
-                                candidate_count=1,
-                                max_output_tokens=4096
-                            )
-                        )
-                        if not response or not response.text:
-                            raise Exception("Empty response from Gemini after truncation")
-                        text = response.text
-                    else:
-                        raise
-            else:
-                # Use streaming for other models
-                response = client.chat.completions.create(
-                    model=model_config['models']['chat'],
-                    messages=messages,
-                    temperature=0.7,
-                    stream=True
-                )
-                
-                print("Request sent, waiting for response...")
-                socketio.emit('status', {'message': 'Receiving AI response...', 'step': 2})
-                
-                # Process the streamed response
-                text = ""
-                chunk_count = 0
-                last_update = time.time()
-                update_interval = 0.5  # Update status every 0.5 seconds
-                
-                for chunk in response:
-                    if chunk and hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
-                        content = chunk.choices[0].delta.content
-                        if content is not None:  # Add null check
-                            text += content
-                            chunk_count += 1
-                        
-                        # Update status periodically
-                        current_time = time.time()
-                        if current_time - last_update >= update_interval:
-                            elapsed = current_time - start_time
-                            tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
-                            print(f"\rReceived {chunk_count} chunks ({len(text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
-                            socketio.emit('status', {
-                                'message': f'Receiving chat response... ({len(text)} characters)',
-                                'step': 2,
-                                'progress': {
-                                    'chunks': chunk_count,
-                                    'chars': len(text),
-                                    'elapsed': elapsed,
-                                    'rate': tokens_per_second
-                                }
-                            })
-                            last_update = current_time
-                
-                if not text:
-                    raise Exception("No content received from streaming response")
+                else:
+                    raise
+        else:
+            # Use streaming for other OpenAI-compatible models
+            response = client.chat.completions.create(
+                model=model_config['models']['chat'],
+                messages=messages,
+                temperature=0.7,
+                stream=True
+            )
+            
+            print("Request sent, waiting for response...")
+            socketio.emit('status', {'message': 'Receiving AI response...', 'step': 2})
+            
+            # Process the streamed response
+            text = ""
+            chunk_count = 0
+            last_update = time.time()
+            update_interval = 0.5
+            
+            for chunk in response:
+                if chunk and hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
+                    content = chunk.choices[0].delta.content
+                    if content is not None:
+                        text += content
+                        chunk_count += 1
                     
-                print(f"\nResponse complete in {time.time() - start_time:.1f}s")
-                print(f"Total response size: {len(text)} characters in {chunk_count} chunks")
+                    current_time = time.time()
+                    if current_time - last_update >= update_interval:
+                        elapsed = current_time - start_time
+                        tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
+                        print(f"\rReceived {chunk_count} chunks ({len(text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
+                        socketio.emit('status', {
+                            'message': f'Receiving chat response... ({len(text)} characters)',
+                            'step': 2,
+                            'progress': {
+                                'chunks': chunk_count,
+                                'chars': len(text),
+                                'elapsed': elapsed,
+                                'rate': tokens_per_second
+                            }
+                        })
+                        last_update = current_time
+            
+            if not text:
+                raise Exception("No content received from streaming response")
+            
+            print(f"\nResponse complete in {time.time() - start_time:.1f}s")
+            print(f"Total response size: {len(text)} characters in {chunk_count} chunks")
 
         print("\n=== Step 3: Formatting Response ===")
         socketio.emit('status', {'message': 'Formatting response...', 'step': 3})
@@ -1000,7 +1005,7 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
     except Exception as e:
         socketio.emit('status', {'message': f'Error: {str(e)}', 'step': -1})
         print(f"\nError getting chat response: {str(e)}")
-        raise Exception(f"Failed to get chat response: {str(e)}")
+        raise
 
 @app.route('/models', methods=['GET'])
 def get_available_models():
