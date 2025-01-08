@@ -95,6 +95,36 @@ AVAILABLE_MODELS = {
             'chat': 'claude-3-5-sonnet-20241022'
         },
         'max_tokens': 100000
+    },
+    'gpt-4-turbo': {
+        'name': 'GPT-4 Turbo',
+        'api_key_env': 'OPENAI_API_KEY',
+        'client_class': OpenAI,
+        'models': {
+            'code': 'gpt-4-turbo',
+            'chat': 'gpt-4-turbo'
+        },
+        'max_tokens': 100000
+    },
+    'gpt-4o': {
+        'name': 'GPT-4o',
+        'api_key_env': 'OPENAI_API_KEY',
+        'client_class': OpenAI,
+        'models': {
+            'code': 'gpt-4o',
+            'chat': 'gpt-4o'
+        },
+        'max_tokens': 100000
+    },
+    'o1': {
+        'name': 'o1 Preview',
+        'api_key_env': 'OPENAI_API_KEY',
+        'client_class': OpenAI,
+        'models': {
+            'code': 'o1-preview',
+            'chat': 'o1-preview'
+        },
+        'max_tokens': 100000
     }
 }
 
@@ -860,10 +890,16 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         print(f"Model: {model_id}")
         
         # Create messages array for the chat
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message}
-        ]
+        if model_id == 'o1':
+            # For o1 model, combine system message and user message
+            messages = [
+                {"role": "user", "content": f"{system_message}\n\nUser request: {user_message}"}
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message}
+            ]
         
         # Estimate tokens in messages
         system_tokens = len(system_message.encode('utf-8')) // 4  # Rough estimate
@@ -966,7 +1002,7 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
             response = client.chat.completions.create(
                 model=model_config['models']['chat'],
                 messages=messages,
-                temperature=0.7,
+                temperature=1 if model_id == 'o1' else 0.7,
                 stream=True
             )
             

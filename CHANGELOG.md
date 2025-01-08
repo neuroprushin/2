@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.11] - 2024-01-12
+
+### Added
+- New OpenAI models:
+  - GPT-4 Turbo: Latest GPT-4 model with improved performance
+  - GPT-4o: Optimized GPT-4 variant
+  - o1 Preview: New experimental model with specialized capabilities
+- Enhanced model compatibility:
+  - Adjusted temperature settings for o1 model
+  - Improved message handling for system prompts
+  - Optimized streaming responses
+
+### Fixed
+- Temperature parameter handling for o1 model
+- System message format for o1 compatibility
+- Model-specific parameter validation
+
 ## [0.0.10] - 2024-01-11
 
 ### Added

@@ -11,6 +11,9 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
   - Qwen 2.5 Coder
   - Llama 3.3 70B Instruct
   - Claude 3.5 Sonnet
+  - GPT-4 Turbo
+  - GPT-4o
+  - o1 Preview
 
 - **File Attachment Support**:
   - PDF files with text extraction
@@ -82,6 +85,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
    GROK_API_KEY=your_grok_api_key
    GOOGLE_API_KEY=your_google_api_key
    ANTHROPIC_API_KEY=your_anthropic_api_key
+   OPENAI_API_KEY=your_openai_api_key
    ```
 
 ## Usage
