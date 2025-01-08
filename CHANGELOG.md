@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.10] - 2024-01-11
+
+### Added
+- Native Windows support without admin privileges:
+  - Directory junctions for workspace imports
+  - Platform-specific path handling
+  - Automatic detection of Windows environment
+  - Seamless workspace management across platforms
+
+### Enhanced
+- Cross-platform compatibility:
+  - Improved workspace import mechanism
+  - Better handling of directory operations
+  - Platform-specific optimizations
+  - Unified workspace experience
+
+### Fixed
+- Windows privilege escalation requirement
+- Directory junction handling on Windows
+- Cross-platform path separators
+- Workspace deletion on Windows
+
 ## [0.0.9] - 2024-01-10
 
 ### Added

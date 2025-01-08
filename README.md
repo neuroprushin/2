@@ -121,8 +121,9 @@ Their contributions have been instrumental in making J.A.R.V.I.S. better.
 This application has been tested and confirmed working on:
 - Linux (native)
 - Windows Subsystem for Linux (WSL 2)
+- Windows (native, no admin privileges required)
 
-For best results, we recommend running the application in one of these environments.
+The application uses directory junctions on Windows to avoid requiring admin privileges, while maintaining symlink functionality on Unix-like systems.
 
 ## License
 
