@@ -44,14 +44,14 @@ AVAILABLE_MODELS = {
         'max_tokens': 100000
     },
     'gemini': {
-        'name': 'Gemini 2.0 Flash Experimental',
+        'name': 'Google: Gemini Pro',
         'api_key_env': 'GOOGLE_API_KEY',
         'client_class': 'genai',
         'models': {
-            'code': 'gemini-2.0-flash-exp',
-            'chat': 'gemini-2.0-flash-exp'
+            'code': 'gemini-pro',
+            'chat': 'gemini-pro'
         },
-        'max_tokens': 30000  # Gemini has a smaller context window
+        'max_tokens': 30000
     },
     'grok': {
         'name': 'Grok 2',
@@ -598,6 +598,19 @@ def process_prompt():
         # Process operations to add diffs
         suggestions['operations'] = workspace_manager.process_operations(suggestions['operations'], workspace_dir)
         
+        # Always generate diffs for all operations
+        for operation in suggestions['operations']:
+            if operation['type'] in ['edit_file', 'create_file']:
+                diff_info = get_operation_diff(operation, workspace_dir)
+                operation.update(diff_info)  # Add diff information to the operation
+                
+                # Ensure we have the content field for all operations
+                if 'content' not in operation:
+                    operation['content'] = diff_info['new_content']
+                
+                print(f"Generated diff for {operation['path']}:")
+                print(diff_info['diff'])
+        
         # Apply changes if no approval needed
         if not suggestions.get('requires_approval', True):
             results = apply_changes(suggestions, workspace_dir)
@@ -890,40 +903,73 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         elif model_id == 'gemini':
             # Use the Google AI client
             try:
-                model = client.GenerativeModel(model_config['models']['chat'])
+                model = client.GenerativeModel('gemini-pro')
                 chat = model.start_chat(history=[])
+                
+                # Combine all messages into a single context
+                full_context = "\n\n".join(msg['content'] for msg in messages)
+                
                 response = chat.send_message(
-                    f"{system_message}\n\nUser request: {user_message}",
+                    full_context,
                     generation_config=genai.types.GenerationConfig(
-                        temperature=0.7,
+                        temperature=0.1,
                         candidate_count=1,
-                        max_output_tokens=4096
+                        max_output_tokens=8192
                     )
                 )
+                
                 if not response or not response.text:
                     raise Exception("Empty response from Gemini")
-                text = response.text
-                print(f"\nResponse received in {time.time() - start_time:.1f}s")
-                print(f"Response length: {len(text)} characters")
+                
+                # Clean up the response text
+                full_text = response.text.strip()
+                
+                # Try to extract JSON if it's wrapped in code blocks
+                if full_text.startswith('```') and full_text.endswith('```'):
+                    full_text = full_text.strip('`').strip()
+                if full_text.startswith('```json'):
+                    full_text = full_text.replace('```json', '', 1).strip()
+                
+                # Try to find JSON content within the response
+                json_start = full_text.find('{')
+                json_end = full_text.rfind('}')
+                
+                if json_start != -1 and json_end != -1 and json_start < json_end:
+                    try:
+                        # Extract and parse the JSON part
+                        json_text = full_text[json_start:json_end + 1]
+                        result = json.loads(json_text)
+                        
+                        if isinstance(result, dict) and 'operations' in result:
+                            return result
+                            
+                    except json.JSONDecodeError:
+                        pass
+                        
+                raise ValueError("Could not get a valid JSON response. Please try again with a clearer prompt.")
             except Exception as e:
                 error_msg = str(e)
                 if "maximum context length" in error_msg.lower():
                     # Try again with more aggressive truncation
-                    system_message = workspace_manager._truncate_content_for_context(
-                        system_message, 
-                        max_tokens=15000  # Even more conservative limit
-                    )
+                    for i in range(len(messages) - 1):
+                        if messages[i]['role'] == 'system':
+                            messages[i]['content'] = workspace_manager._truncate_content_for_context(
+                                messages[i]['content'],
+                                max_tokens=10000  # Even more conservative
+                            )
+                    # Combine truncated messages
+                    full_context = "\n\n".join(msg['content'] for msg in messages)
                     response = chat.send_message(
-                        f"{system_message}\n\nUser request: {user_message}",
+                        full_context,
                         generation_config=genai.types.GenerationConfig(
-                            temperature=0.7,
+                            temperature=0.1,
                             candidate_count=1,
                             max_output_tokens=4096
                         )
                     )
                     if not response or not response.text:
                         raise Exception("Empty response from Gemini after truncation")
-                    text = response.text
+                    full_text = response.text
                 else:
                     raise
         else:
@@ -1313,7 +1359,7 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
             # For Gemini, use the Google AI client
             if model_id == 'gemini':
                 try:
-                    model = client.GenerativeModel(model_config['models']['code'])
+                    model = client.GenerativeModel('gemini-pro')
                     chat = model.start_chat(history=[])
                     
                     # Combine all messages into a single context
@@ -1324,14 +1370,39 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
                         generation_config=genai.types.GenerationConfig(
                             temperature=0.1,
                             candidate_count=1,
-                            max_output_tokens=4096
+                            max_output_tokens=8192
                         )
                     )
+                    
                     if not response or not response.text:
                         raise Exception("Empty response from Gemini")
-                    full_text = response.text
-                    print(f"\nResponse received in {time.time() - start_time:.1f}s")
-                    print(f"Response length: {len(full_text)} characters")
+                    
+                    # Clean up the response text
+                    full_text = response.text.strip()
+                    
+                    # Try to extract JSON if it's wrapped in code blocks
+                    if full_text.startswith('```') and full_text.endswith('```'):
+                        full_text = full_text.strip('`').strip()
+                    if full_text.startswith('```json'):
+                        full_text = full_text.replace('```json', '', 1).strip()
+                    
+                    # Try to find JSON content within the response
+                    json_start = full_text.find('{')
+                    json_end = full_text.rfind('}')
+                    
+                    if json_start != -1 and json_end != -1 and json_start < json_end:
+                        try:
+                            # Extract and parse the JSON part
+                            json_text = full_text[json_start:json_end + 1]
+                            result = json.loads(json_text)
+                            
+                            if isinstance(result, dict) and 'operations' in result:
+                                return result
+                                
+                        except json.JSONDecodeError:
+                            pass
+                            
+                    raise ValueError("Could not get a valid JSON response. Please try again with a clearer prompt.")
                 except Exception as e:
                     error_msg = str(e)
                     if "maximum context length" in error_msg.lower():
@@ -1611,6 +1682,53 @@ def init_model_clients():
     
     if os.getenv('ANTHROPIC_API_KEY'):
         model_clients['claude'] = Anthropic()  # Use actual Anthropic client
+
+def get_operation_diff(operation, workspace_dir):
+    """Generate a diff for a file operation"""
+    try:
+        file_path = os.path.join(workspace_dir, operation['path'])
+        
+        # Get current content
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                current_content = f.read()
+        except:
+            current_content = ''
+        
+        # For create operations
+        if operation['type'] == 'create_file':
+            new_content = operation.get('content', '')
+            
+        # For edit operations
+        elif operation['type'] == 'edit_file':
+            new_content = current_content
+            for change in operation.get('changes', []):
+                if 'old' in change and 'new' in change:
+                    new_content = new_content.replace(change['old'], change['new'])
+            # Store the new content in the operation
+            operation['content'] = new_content
+        
+        # Generate unified diff
+        from difflib import unified_diff
+        diff_lines = list(unified_diff(
+            current_content.splitlines(keepends=True),
+            new_content.splitlines(keepends=True),
+            fromfile=f"a/{operation['path']}",
+            tofile=f"b/{operation['path']}"
+        ))
+        
+        return {
+            'old_content': current_content,
+            'new_content': new_content,
+            'diff': ''.join(diff_lines) if diff_lines else f"No changes detected in {operation['path']}"
+        }
+    except Exception as e:
+        print(f"Error generating diff for {operation['path']}: {str(e)}")
+        return {
+            'old_content': '',
+            'new_content': '',
+            'diff': f"Error generating diff: {str(e)}"
+        }
 
 if __name__ == '__main__':
     # Watch static and template directories for changes
