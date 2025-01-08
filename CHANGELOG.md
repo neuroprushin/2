@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.9] - 2024-01-10
+
+### Added
+- New AI models:
+  - Llama 3.3 70B Instruct
+  - Gemini 2.0 Flash Thinking Experimental
+- Enhanced model handling:
+  - Better context length management
+  - Improved error handling for Gemini responses
+  - Automatic context truncation for large inputs
+  - Streaming support optimization
+
+### Changed
+- Improved code suggestion system:
+  - More robust JSON response parsing
+  - Better handling of markdown code blocks
+  - Enhanced error recovery for model responses
+- Optimized file handling:
+  - Removed unused imports
+  - Consolidated duplicate functions
+  - Improved code organization
+
+### Fixed
+- Model response handling for Gemini
+- Context length issues with large files
+- JSON parsing for code suggestions
+- Import statement cleanup
+
 ## [0.0.8] - 2024-01-09
 
 ### Added

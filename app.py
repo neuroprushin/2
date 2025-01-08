@@ -28,7 +28,8 @@ AVAILABLE_MODELS = {
         'models': {
             'code': 'deepseek-chat',
             'chat': 'deepseek-chat'
-        }
+        },
+        'max_tokens': 100000
     },
     'deepseek-openrouter': {
         'name': 'DeepSeek V3 (OpenRouter)',
@@ -38,7 +39,19 @@ AVAILABLE_MODELS = {
         'models': {
             'code': 'deepseek/deepseek-chat',
             'chat': 'deepseek/deepseek-chat'
-        }
+        },
+        'max_tokens': 100000
+    },
+    'gemini': {
+        'name': 'Google: Gemini 2.0 Flash Thinking Experimental',
+        'api_key_env': 'OPENROUTER_API_KEY',
+        'client_class': OpenAI,
+        'base_url': 'https://openrouter.ai/api/v1',
+        'models': {
+            'code': 'google/gemini-2.0-flash-thinking-exp:free',
+            'chat': 'google/gemini-2.0-flash-thinking-exp:free'
+        },
+        'max_tokens': 30000  # Gemini has a smaller context window
     },
     'grok': {
         'name': 'Grok 2',
@@ -48,7 +61,8 @@ AVAILABLE_MODELS = {
         'models': {
             'code': 'grok-2-latest',
             'chat': 'grok-2-latest'
-        }
+        },
+        'max_tokens': 100000
     },
     'qwen': {
         'name': 'Qwen 2.5 Coder',
@@ -58,7 +72,19 @@ AVAILABLE_MODELS = {
         'models': {
             'code': 'qwen/qwen-2.5-coder-32b-instruct',
             'chat': 'qwen/qwen-2.5-coder-32b-instruct'
-        }
+        },
+        'max_tokens': 100000
+    },
+    'llama': {
+        'name': 'Llama 3.3 70B Instruct',
+        'api_key_env': 'OPENROUTER_API_KEY',
+        'client_class': OpenAI,
+        'base_url': 'https://openrouter.ai/api/v1',
+        'models': {
+            'code': 'meta-llama/llama-3.3-70b-instruct',
+            'chat': 'meta-llama/llama-3.3-70b-instruct'
+        },
+        'max_tokens': 100000
     },
     'claude': {
         'name': 'Claude 3.5 Sonnet',
@@ -67,7 +93,8 @@ AVAILABLE_MODELS = {
         'models': {
             'code': 'claude-3-5-sonnet-20241022',
             'chat': 'claude-3-5-sonnet-20241022'
-        }
+        },
+        'max_tokens': 100000
     }
 }
 
@@ -804,6 +831,27 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
     try:
         print("\n=== Step 1: Preparing Chat Request ===")
         print(f"Model: {model_id}")
+        
+        # Estimate tokens in messages
+        system_tokens = len(system_message.encode('utf-8')) // 4  # Rough estimate
+        user_tokens = len(user_message.encode('utf-8')) // 4
+        total_tokens = system_tokens + user_tokens
+        
+        # If total tokens exceed model's limit, truncate the system message
+        max_tokens = model_config.get('max_tokens', 100000)
+        if total_tokens > max_tokens:
+            # Keep user message intact, truncate system message
+            available_tokens = max_tokens - user_tokens - 1000  # Leave some buffer
+            if available_tokens > 0:
+                # Use workspace manager's truncation method
+                system_message = workspace_manager._truncate_content_for_context(
+                    system_message, 
+                    max_tokens=available_tokens
+                )
+                print(f"Truncated system message to fit within {available_tokens} tokens")
+            else:
+                raise Exception("Message too long even after truncation")
+        
         print(f"System message length: {len(system_message)} characters")
         print(f"User message length: {len(user_message)} characters")
         
@@ -850,21 +898,13 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         
         if model_id == 'claude':
             # Use Anthropic's client interface
-            full_context = f"{system_prompt}\n\n"
-            if workspace_context:
-                full_context += f"Workspace context:\n{workspace_context}\n\n"
-            if files_content:
-                full_context += "Files content:\n"
-                for path, content in files_content.items():
-                    full_context += f"\nFile: {path}\nContent:\n{content}\n"
-            
             response = client.messages.create(
-                model=model_config['models']['code'],
+                model=model_config['models']['chat'],
                 messages=[{
                     "role": "user",
-                    "content": f"{full_context}\n\nUser request: {prompt}\n\nPlease provide your response in valid JSON format following the structure specified in the system prompt."
+                    "content": f"{system_message}\n\nUser request: {user_message}"
                 }],
-                temperature=0.1,
+                temperature=0.7,
                 max_tokens=4096
             )
             text = response.content[0].text
@@ -877,50 +917,81 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                 {"role": "user", "content": user_message}
             ]
             
-            # Use streaming for better progress tracking
-            response = client.chat.completions.create(
-                model=model_config['models']['chat'],
-                messages=messages,
-                temperature=0.7,
-                stream=True
-            )
-            
-            print("Request sent, waiting for response...")
-            socketio.emit('status', {'message': 'Receiving AI response...', 'step': 2})
-            
-            # Process the streamed response
-            text = ""
-            chunk_count = 0
-            last_update = time.time()
-            update_interval = 0.5  # Update status every 0.5 seconds
-            
-            for chunk in response:
-                if chunk and hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
-                    content = chunk.choices[0].delta.content
-                    if content is not None:  # Add null check
-                        text += content
-                        chunk_count += 1
-                    
-                    # Update status periodically
-                    current_time = time.time()
-                    if current_time - last_update >= update_interval:
-                        elapsed = current_time - start_time
-                        tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
-                        print(f"\rReceived {chunk_count} chunks ({len(text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
-                        socketio.emit('status', {
-                            'message': f'Receiving chat response... ({len(text)} characters)',
-                            'step': 2,
-                            'progress': {
-                                'chunks': chunk_count,
-                                'chars': len(text),
-                                'elapsed': elapsed,
-                                'rate': tokens_per_second
-                            }
-                        })
-                        last_update = current_time
-            
-            print(f"\nResponse complete in {time.time() - start_time:.1f}s")
-            print(f"Total response size: {len(text)} characters in {chunk_count} chunks")
+            # For Gemini through OpenRouter, we need to handle the response differently
+            if model_id == 'gemini':
+                try:
+                    response = client.chat.completions.create(
+                        model=model_config['models']['chat'],
+                        messages=messages,
+                        temperature=0.7,
+                        stream=False  # Don't use streaming for Gemini
+                    )
+                    text = response.choices[0].message.content
+                    print(f"\nResponse received in {time.time() - start_time:.1f}s")
+                    print(f"Response length: {len(text)} characters")
+                except Exception as e:
+                    error_msg = str(e)
+                    if "maximum context length" in error_msg.lower():
+                        # Try again with more aggressive truncation
+                        system_message = workspace_manager._truncate_content_for_context(
+                            system_message, 
+                            max_tokens=15000  # Even more conservative limit
+                        )
+                        messages[0]["content"] = system_message
+                        response = client.chat.completions.create(
+                            model=model_config['models']['chat'],
+                            messages=messages,
+                            temperature=0.7,
+                            stream=False
+                        )
+                        text = response.choices[0].message.content
+                    else:
+                        raise
+            else:
+                # Use streaming for other models
+                response = client.chat.completions.create(
+                    model=model_config['models']['chat'],
+                    messages=messages,
+                    temperature=0.7,
+                    stream=True
+                )
+                
+                print("Request sent, waiting for response...")
+                socketio.emit('status', {'message': 'Receiving AI response...', 'step': 2})
+                
+                # Process the streamed response
+                text = ""
+                chunk_count = 0
+                last_update = time.time()
+                update_interval = 0.5  # Update status every 0.5 seconds
+                
+                for chunk in response:
+                    if chunk and hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
+                        content = chunk.choices[0].delta.content
+                        if content is not None:  # Add null check
+                            text += content
+                            chunk_count += 1
+                        
+                        # Update status periodically
+                        current_time = time.time()
+                        if current_time - last_update >= update_interval:
+                            elapsed = current_time - start_time
+                            tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
+                            print(f"\rReceived {chunk_count} chunks ({len(text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
+                            socketio.emit('status', {
+                                'message': f'Receiving chat response... ({len(text)} characters)',
+                                'step': 2,
+                                'progress': {
+                                    'chunks': chunk_count,
+                                    'chars': len(text),
+                                    'elapsed': elapsed,
+                                    'rate': tokens_per_second
+                                }
+                            })
+                            last_update = current_time
+                
+                print(f"\nResponse complete in {time.time() - start_time:.1f}s")
+                print(f"Total response size: {len(text)} characters in {chunk_count} chunks")
 
         print("\n=== Step 3: Formatting Response ===")
         socketio.emit('status', {'message': 'Formatting response...', 'step': 3})
@@ -1201,42 +1272,8 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
         print(f"Model: {model_id}")
         print(f"Prompt length: {len(prompt)} characters")
         
-        # Extract and log information about files in context
-        files_info = []
-        if files_content:
-            for file_path, content in files_content.items():
-                lines = content.count('\n') + 1
-                size = len(content.encode('utf-8'))  # Get size in bytes
-                files_info.append({
-                    'path': file_path,
-                    'lines': lines,
-                    'size': size
-                })
-            
-            # Log and emit detailed status about context files
-            file_details = '\n'.join(f"- {f['path']} ({f['lines']} lines, {f['size']} bytes)" for f in files_info)
-            print(f"\nContext files:\n{file_details}")
-            socketio.emit('status', {
-                'message': f'Using {len(files_info)} files as context...',
-                'step': 1,
-                'details': {
-                    'files': files_info,
-                    'total_files': len(files_info),
-                    'total_lines': sum(f['lines'] for f in files_info),
-                    'total_size': sum(f['size'] for f in files_info)
-                }
-            })
-        
-        if workspace_context:
-            print(f"\nWorkspace context length: {len(workspace_context)} characters")
-        
-        socketio.emit('status', {'message': 'Sending request to AI model...', 'step': 1})
-        
         # Create the messages array for the chat
-        messages = []
-        
-        # Add system prompt
-        messages.append({"role": "system", "content": system_prompt})
+        messages = [{"role": "system", "content": system_prompt}]
         
         # Add workspace context if provided
         if workspace_context:
@@ -1253,24 +1290,37 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
         # Add the user's prompt
         messages.append({"role": "user", "content": prompt})
         
+        # Estimate total tokens
+        total_tokens = sum(len(msg['content'].encode('utf-8')) // 4 for msg in messages)
+        max_tokens = model_config.get('max_tokens', 100000)
+        
+        # If total tokens exceed model's limit, truncate the system messages
+        if total_tokens > max_tokens:
+            # Keep prompt intact, truncate context
+            available_tokens = max_tokens - (len(prompt.encode('utf-8')) // 4) - 1000  # Leave buffer
+            if available_tokens > 0:
+                # Truncate each system message proportionally
+                for i in range(len(messages) - 1):  # Skip the last message (user prompt)
+                    if messages[i]['role'] == 'system':
+                        messages[i]['content'] = workspace_manager._truncate_content_for_context(
+                            messages[i]['content'],
+                            max_tokens=available_tokens // (len(messages) - 1)
+                        )
+                print(f"Truncated context to fit within {available_tokens} tokens")
+            else:
+                raise Exception("Message too long even after truncation")
+        
         print("\n=== Step 2: Sending Request to AI Model ===")
         start_time = time.time()
         
         if model_id == 'claude':
             # Use Anthropic's client interface
-            full_context = f"{system_prompt}\n\n"
-            if workspace_context:
-                full_context += f"Workspace context:\n{workspace_context}\n\n"
-            if files_content:
-                full_context += "Files content:\n"
-                for path, content in files_content.items():
-                    full_context += f"\nFile: {path}\nContent:\n{content}\n"
-            
+            full_context = "\n\n".join(msg['content'] for msg in messages)
             response = client.messages.create(
                 model=model_config['models']['code'],
                 messages=[{
                     "role": "user",
-                    "content": f"{full_context}\n\nUser request: {prompt}\n\nPlease provide your response in valid JSON format following the structure specified in the system prompt."
+                    "content": f"{full_context}\n\nPlease provide your response in valid JSON format following the structure specified in the system prompt."
                 }],
                 temperature=0.1,
                 max_tokens=4096
@@ -1279,52 +1329,81 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
             print(f"Response length: {len(full_text)} characters")
         else:
-            # Use OpenAI's client interface with streaming
-            response = client.chat.completions.create(
-                model=model_config['models']['code'],
-                messages=messages,
-                temperature=0.1,
-                stream=True
-            )
-            
-            print("Request sent, waiting for response...")
-            socketio.emit('status', {'message': 'Receiving AI response...', 'step': 2})
-            
-            # Process the streamed response
-            full_text = ""
-            chunk_count = 0
-            last_update = time.time()
-            update_interval = 0.5  # Update status every 0.5 seconds
-            
-            for chunk in response:
-                if chunk and hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
-                    content = chunk.choices[0].delta.content
-                    if content is not None:  # Add null check
-                        full_text += content
-                        chunk_count += 1
+            # For Gemini through OpenRouter, handle differently
+            if model_id == 'gemini':
+                try:
+                    response = client.chat.completions.create(
+                        model=model_config['models']['code'],
+                        messages=messages,
+                        temperature=0.1,
+                        stream=False  # Don't use streaming for Gemini
+                    )
+                    full_text = response.choices[0].message.content
+                    print(f"\nResponse received in {time.time() - start_time:.1f}s")
+                    print(f"Response length: {len(full_text)} characters")
+                except Exception as e:
+                    error_msg = str(e)
+                    if "maximum context length" in error_msg.lower():
+                        # Try again with more aggressive truncation
+                        for i in range(len(messages) - 1):
+                            if messages[i]['role'] == 'system':
+                                messages[i]['content'] = workspace_manager._truncate_content_for_context(
+                                    messages[i]['content'],
+                                    max_tokens=10000  # Even more conservative
+                                )
+                        response = client.chat.completions.create(
+                            model=model_config['models']['code'],
+                            messages=messages,
+                            temperature=0.1,
+                            stream=False
+                        )
+                        full_text = response.choices[0].message.content
                     else:
-                        print("\rReceived empty content chunk", end="")
-                    
-                    # Update status periodically
-                    current_time = time.time()
-                    if current_time - last_update >= update_interval:
-                        elapsed = current_time - start_time
-                        tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
-                        print(f"\rReceived {chunk_count} chunks ({len(full_text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
-                        socketio.emit('status', {
-                            'message': f'Receiving response... ({len(full_text)} characters)',
-                            'step': 2,
-                            'progress': {
-                                'chunks': chunk_count,
-                                'chars': len(full_text),
-                                'elapsed': elapsed,
-                                'rate': tokens_per_second
-                            }
-                        })
-                        last_update = current_time
-            
-            print(f"\nResponse complete in {time.time() - start_time:.1f}s")
-            print(f"Total response size: {len(full_text)} characters in {chunk_count} chunks")
+                        raise
+            else:
+                # Use streaming for other models
+                response = client.chat.completions.create(
+                    model=model_config['models']['code'],
+                    messages=messages,
+                    temperature=0.1,
+                    stream=True
+                )
+                
+                print("Request sent, waiting for response...")
+                socketio.emit('status', {'message': 'Receiving AI response...', 'step': 2})
+                
+                # Process the streamed response
+                full_text = ""
+                chunk_count = 0
+                last_update = time.time()
+                update_interval = 0.5
+                
+                for chunk in response:
+                    if chunk and hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
+                        content = chunk.choices[0].delta.content
+                        if content is not None:
+                            full_text += content
+                            chunk_count += 1
+                        
+                        current_time = time.time()
+                        if current_time - last_update >= update_interval:
+                            elapsed = current_time - start_time
+                            tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
+                            print(f"\rReceived {chunk_count} chunks ({len(full_text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
+                            socketio.emit('status', {
+                                'message': f'Receiving response... ({len(full_text)} characters)',
+                                'step': 2,
+                                'progress': {
+                                    'chunks': chunk_count,
+                                    'chars': len(full_text),
+                                    'elapsed': elapsed,
+                                    'rate': tokens_per_second
+                                }
+                            })
+                            last_update = current_time
+                
+                print(f"\nResponse complete in {time.time() - start_time:.1f}s")
+                print(f"Total response size: {len(full_text)} characters in {chunk_count} chunks")
 
         # Clean up the response text
         cleaned_text = full_text.strip()
@@ -1347,80 +1426,11 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
                 result = json.loads(json_text)
                 
                 if isinstance(result, dict) and 'operations' in result:
-                    # Validate operations
-                    valid_operations = []
-                    for op in result['operations']:
-                        if not isinstance(op, dict):
-                            continue
-                            
-                        # Ensure required fields are present
-                        if 'type' not in op or 'path' not in op:
-                            continue
-                            
-                        # Validate operation type
-                        if op['type'] not in ['create_file', 'edit_file', 'remove_file', 'rename_file']:
-                            continue
-                            
-                        # Validate operation-specific fields
-                        if op['type'] == 'create_file' and 'content' not in op:
-                            continue
-                        elif op['type'] == 'edit_file' and 'changes' not in op:
-                            continue
-                        elif op['type'] == 'rename_file' and 'new_path' not in op:
-                            continue
-                            
-                        valid_operations.append(op)
+                    return result
                     
-                    if valid_operations:
-                        result['operations'] = valid_operations
-                        return result
-                        
             except json.JSONDecodeError:
                 pass
                 
-        # If we couldn't parse the response, try one more time with the model
-        if model_id == 'claude':
-            try:
-                # Ask Claude to fix its response
-                response = client.messages.create(
-                    model=model_config['models']['code'],
-                    messages=[{
-                        "role": "user",
-                        "content": "Your last response was not in valid JSON format. Please provide your response again, ensuring it's a valid JSON object with 'explanation' and 'operations' fields as specified in the system prompt. Include ONLY the JSON object, no markdown or other text."
-                    }],
-                    temperature=0.1,
-                    max_tokens=4096
-                )
-                retry_text = response.content[0].text.strip()
-                if retry_text.startswith('{') and retry_text.endswith('}'):
-                    result = json.loads(retry_text)
-                    if isinstance(result, dict) and 'operations' in result:
-                        return result
-            except:
-                pass
-        else:
-            # For other models, try to get a new response
-            try:
-                response = client.chat.completions.create(
-                    model=model_config['models']['code'],
-                    messages=messages + [{
-                        "role": "assistant",
-                        "content": full_text
-                    }, {
-                        "role": "user",
-                        "content": "Your last response was not in valid JSON format. Please provide your response again as a valid JSON object with 'explanation' and 'operations' fields. Include ONLY the JSON object, no markdown or other text."
-                    }],
-                    temperature=0.1,
-                    stream=False
-                )
-                retry_text = response.choices[0].message.content.strip()
-                if retry_text.startswith('{') and retry_text.endswith('}'):
-                    result = json.loads(retry_text)
-                    if isinstance(result, dict) and 'operations' in result:
-                        return result
-            except:
-                pass
-
         raise ValueError("Could not get a valid JSON response. Please try again with a clearer prompt.")
         
     except Exception as e:
