@@ -251,9 +251,19 @@ def delete_workspace(workspace_id):
         
         # Check if it's an imported workspace
         if os.path.exists(os.path.join(workspace_path, '.imported')):
-            # Just remove the symlink and .imported file
+            # Remove the .imported file
             os.remove(os.path.join(workspace_path, '.imported'))
-            os.unlink(workspace_path)
+            
+            if os.name == 'nt':  # Windows
+                import subprocess
+                try:
+                    # Use rmdir to remove directory junction
+                    subprocess.run(['cmd', '/c', 'rmdir', workspace_path], check=True)
+                except subprocess.CalledProcessError as e:
+                    raise Exception(f"Failed to remove directory junction: {str(e)}")
+            else:
+                # Remove symlink on Unix-like systems
+                os.unlink(workspace_path)
         else:
             # Delete directory for regular workspaces
             try:
@@ -1481,8 +1491,16 @@ def import_folder():
         if os.path.exists(workspace_dir):
             return jsonify({'error': 'A workspace with this name already exists'}), 400
             
-        # Create symlink instead of copying
-        os.symlink(source_path, workspace_dir, target_is_directory=True)
+        # Create link based on platform
+        if os.name == 'nt':  # Windows
+            import subprocess
+            try:
+                # Use mklink /J to create a directory junction (no admin required)
+                subprocess.run(['cmd', '/c', 'mklink', '/J', workspace_dir, source_path], check=True)
+            except subprocess.CalledProcessError as e:
+                return jsonify({'error': f'Failed to create directory junction: {str(e)}'}), 500
+        else:  # Unix-like systems
+            os.symlink(source_path, workspace_dir, target_is_directory=True)
         
         # Create a .imported flag file to mark this as an imported workspace
         with open(os.path.join(workspace_dir, '.imported'), 'w') as f:
