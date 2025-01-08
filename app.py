@@ -44,12 +44,12 @@ AVAILABLE_MODELS = {
         'max_tokens': 100000
     },
     'gemini': {
-        'name': 'Google: Gemini Pro',
+        'name': 'Google: Gemini 2.0 Flash',
         'api_key_env': 'GOOGLE_API_KEY',
         'client_class': 'genai',
         'models': {
-            'code': 'gemini-pro',
-            'chat': 'gemini-pro'
+            'code': 'gemini-2.0-flash-exp',
+            'chat': 'gemini-2.0-flash-exp'
         },
         'max_tokens': 30000
     },
@@ -903,7 +903,7 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         elif model_id == 'gemini':
             # Use the Google AI client
             try:
-                model = client.GenerativeModel('gemini-pro')
+                model = client.GenerativeModel('gemini-2.0-flash-exp')
                 chat = model.start_chat(history=[])
                 
                 # Combine all messages into a single context
@@ -1359,7 +1359,7 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
             # For Gemini, use the Google AI client
             if model_id == 'gemini':
                 try:
-                    model = client.GenerativeModel('gemini-pro')
+                    model = client.GenerativeModel('gemini-2.0-flash-exp')
                     chat = model.start_chat(history=[])
                     
                     # Combine all messages into a single context
