@@ -1322,22 +1322,36 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
         print(f"Prompt length: {len(prompt)} characters")
         
         # Create the messages array for the chat
-        messages = [{"role": "system", "content": system_prompt}]
-        
-        # Add workspace context if provided
-        if workspace_context:
-            print("\nAdding workspace context...")
-            messages.append({"role": "system", "content": f"Workspace context:\n{workspace_context}"})
-        
-        # Add files content if provided
-        if files_content:
-            files_content_str = "Files content:\n"
-            for path, content in files_content.items():
-                files_content_str += f"\nFile: {path}\nContent:\n{content}\n"
-            messages.append({"role": "system", "content": files_content_str})
-        
-        # Add the user's prompt with explicit JSON instruction
-        messages.append({"role": "user", "content": f"{prompt}\n\nIMPORTANT: Your response MUST be a valid JSON object following this exact structure:\n{{\n    \"explanation\": \"Brief explanation of what you will do\",\n    \"operations\": [\n        {{\n            \"type\": \"edit_file\",\n            \"path\": \"relative/path\",\n            \"changes\": [\n                {{\n                    \"old\": \"text to replace\",\n                    \"new\": \"replacement text\"\n                }}\n            ]\n        }}\n    ]\n}}"})
+        if model_id == 'o1':
+            messages = []
+            # Combine all system messages into a single user message
+            system_content = [system_prompt]
+            if workspace_context:
+                system_content.append(f"Workspace context:\n{workspace_context}")
+            if files_content:
+                files_content_str = "Files content:\n"
+                for path, content in files_content.items():
+                    files_content_str += f"\nFile: {path}\nContent:\n{content}\n"
+                system_content.append(files_content_str)
+            system_content.append(f"{prompt}\n\nIMPORTANT: Your response MUST be a valid JSON object following this exact structure:\n{{\n    \"explanation\": \"Brief explanation of what you will do\",\n    \"operations\": [\n        {{\n            \"type\": \"edit_file\",\n            \"path\": \"relative/path\",\n            \"changes\": [\n                {{\n                    \"old\": \"text to replace\",\n                    \"new\": \"replacement text\"\n                }}\n            ]\n        }}\n    ]\n}}")
+            messages = [{"role": "user", "content": "\n\n".join(system_content)}]
+        else:
+            messages = [{"role": "system", "content": system_prompt}]
+            
+            # Add workspace context if provided
+            if workspace_context:
+                print("\nAdding workspace context...")
+                messages.append({"role": "system", "content": f"Workspace context:\n{workspace_context}"})
+            
+            # Add files content if provided
+            if files_content:
+                files_content_str = "Files content:\n"
+                for path, content in files_content.items():
+                    files_content_str += f"\nFile: {path}\nContent:\n{content}\n"
+                messages.append({"role": "system", "content": files_content_str})
+            
+            # Add the user's prompt with explicit JSON instruction
+            messages.append({"role": "user", "content": f"{prompt}\n\nIMPORTANT: Your response MUST be a valid JSON object following this exact structure:\n{{\n    \"explanation\": \"Brief explanation of what you will do\",\n    \"operations\": [\n        {{\n            \"type\": \"edit_file\",\n            \"path\": \"relative/path\",\n            \"changes\": [\n                {{\n                    \"old\": \"text to replace\",\n                    \"new\": \"replacement text\"\n                }}\n            ]\n        }}\n    ]\n}}"})
         
         # Estimate total tokens
         total_tokens = sum(len(msg['content'].encode('utf-8')) // 4 for msg in messages)
@@ -1432,7 +1446,7 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
             response = client.chat.completions.create(
                 model=model_config['models']['code'],
                 messages=messages,
-                temperature=0.1,
+                temperature=1 if model_id == 'o1' else 0.1,
                 stream=True
             )
             
