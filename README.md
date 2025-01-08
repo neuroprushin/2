@@ -107,6 +107,9 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 - **Qwen 2.5 Coder**: Specialized 32B model for code generation
 - **Llama 3.3 70B Instruct**: Large context window and strong code generation capabilities
 - **Claude 3.5 Sonnet**: Advanced reasoning and code understanding
+- **GPT-4 Turbo**: Latest GPT-4 model with improved performance and up-to-date knowledge
+- **GPT-4o**: Optimized GPT-4 variant with enhanced code understanding
+- **o1 Preview**: Experimental model with specialized capabilities and unique instruction handling
 
 ## Contributing
 
