@@ -6,7 +6,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 
 - **Multi-Model Support**: Choose between different AI models for your coding needs:
   - DeepSeek Coder V3
-  - Gemini 2.0 Flash Thinking
+  - Gemini 2.0 Flash Experimental
   - Grok 2
   - Qwen 2.5 Coder
   - Llama 3.3 70B Instruct
@@ -80,7 +80,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
    ```
    DEEPSEEK_API_KEY=your_deepseek_api_key
    GROK_API_KEY=your_grok_api_key
-   OPENROUTER_API_KEY=your_openrouter_api_key
+   GOOGLE_API_KEY=your_google_api_key
    ANTHROPIC_API_KEY=your_anthropic_api_key
    ```
 
@@ -98,7 +98,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 ## Model Capabilities
 
 - **DeepSeek Coder V3**: Specialized in code generation and modification
-- **Gemini 2.0 Flash Thinking**: Experimental model with fast response times and strong code understanding
+- **Gemini 2.0 Pro**: Advanced code generation and natural language understanding
 - **Grok 2**: Advanced language model for code and natural language
 - **Qwen 2.5 Coder**: Specialized 32B model for code generation
 - **Llama 3.3 70B Instruct**: Large context window and strong code generation capabilities

@@ -16,6 +16,7 @@ from flask_socketio import SocketIO, emit
 from dotenv import load_dotenv
 from openai import OpenAI
 from anthropic import Anthropic
+import google.generativeai as genai
 from workspace_manager import WorkspaceManager
 
 # Model configurations
@@ -43,13 +44,12 @@ AVAILABLE_MODELS = {
         'max_tokens': 100000
     },
     'gemini': {
-        'name': 'Google: Gemini 2.0 Flash Thinking Experimental',
-        'api_key_env': 'OPENROUTER_API_KEY',
-        'client_class': OpenAI,
-        'base_url': 'https://openrouter.ai/api/v1',
+        'name': 'Gemini 2.0 Flash Experimental',
+        'api_key_env': 'GOOGLE_API_KEY',
+        'client_class': 'genai',
         'models': {
-            'code': 'google/gemini-2.0-flash-thinking-exp:free',
-            'chat': 'google/gemini-2.0-flash-thinking-exp:free'
+            'code': 'gemini-2.0-flash-exp',
+            'chat': 'gemini-2.0-flash-exp'
         },
         'max_tokens': 30000  # Gemini has a smaller context window
     },
@@ -170,12 +170,16 @@ model_clients = {}
 for model_id, config in AVAILABLE_MODELS.items():
     api_key = os.getenv(config['api_key_env'])
     if api_key:
-        client_kwargs = {'api_key': api_key}
-        # Add base_url if specified
-        if 'base_url' in config:
-            client_kwargs['base_url'] = config['base_url']
-        
-        model_clients[model_id] = config['client_class'](**client_kwargs)
+        if config['client_class'] == 'genai':
+            genai.configure(api_key=api_key)
+            model_clients[model_id] = genai
+        else:
+            client_kwargs = {'api_key': api_key}
+            # Add base_url if specified
+            if 'base_url' in config:
+                client_kwargs['base_url'] = config['base_url']
+            
+            model_clients[model_id] = config['client_class'](**client_kwargs)
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # For session management
@@ -877,26 +881,22 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
             print(f"Response length: {len(text)} characters")
         else:
-            # Use OpenAI's client interface
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": user_message}
-            ]
-            
-            # For Gemini through OpenRouter, we need to handle the response differently
+            # For Gemini, use the Google AI client
             if model_id == 'gemini':
                 try:
-                    response = client.chat.completions.create(
-                        model=model_config['models']['chat'],
-                        messages=messages,
-                        temperature=0.7,
-                        stream=False  # Don't use streaming for Gemini
+                    model = client.GenerativeModel(model_config['models']['chat'])
+                    chat = model.start_chat(history=[])
+                    response = chat.send_message(
+                        f"{system_message}\n\nUser request: {user_message}",
+                        generation_config=genai.types.GenerationConfig(
+                            temperature=0.7,
+                            candidate_count=1,
+                            max_output_tokens=4096
+                        )
                     )
-                    if not response or not response.choices:
+                    if not response or not response.text:
                         raise Exception("Empty response from Gemini")
-                    text = response.choices[0].message.content
-                    if not text:
-                        raise Exception("Empty message content from Gemini")
+                    text = response.text
                     print(f"\nResponse received in {time.time() - start_time:.1f}s")
                     print(f"Response length: {len(text)} characters")
                 except Exception as e:
@@ -907,18 +907,17 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                             system_message, 
                             max_tokens=15000  # Even more conservative limit
                         )
-                        messages[0]["content"] = system_message
-                        response = client.chat.completions.create(
-                            model=model_config['models']['chat'],
-                            messages=messages,
-                            temperature=0.7,
-                            stream=False
+                        response = chat.send_message(
+                            f"{system_message}\n\nUser request: {user_message}",
+                            generation_config=genai.types.GenerationConfig(
+                                temperature=0.7,
+                                candidate_count=1,
+                                max_output_tokens=4096
+                            )
                         )
-                        if not response or not response.choices:
+                        if not response or not response.text:
                             raise Exception("Empty response from Gemini after truncation")
-                        text = response.choices[0].message.content
-                        if not text:
-                            raise Exception("Empty message content from Gemini after truncation")
+                        text = response.text
                     else:
                         raise
             else:
@@ -1306,16 +1305,26 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
             print(f"Response length: {len(full_text)} characters")
         else:
-            # For Gemini through OpenRouter, handle differently
+            # For Gemini, use the Google AI client
             if model_id == 'gemini':
                 try:
-                    response = client.chat.completions.create(
-                        model=model_config['models']['code'],
-                        messages=messages,
-                        temperature=0.1,
-                        stream=False  # Don't use streaming for Gemini
+                    model = client.GenerativeModel(model_config['models']['code'])
+                    chat = model.start_chat(history=[])
+                    
+                    # Combine all messages into a single context
+                    full_context = "\n\n".join(msg['content'] for msg in messages)
+                    
+                    response = chat.send_message(
+                        full_context,
+                        generation_config=genai.types.GenerationConfig(
+                            temperature=0.1,
+                            candidate_count=1,
+                            max_output_tokens=4096
+                        )
                     )
-                    full_text = response.choices[0].message.content
+                    if not response or not response.text:
+                        raise Exception("Empty response from Gemini")
+                    full_text = response.text
                     print(f"\nResponse received in {time.time() - start_time:.1f}s")
                     print(f"Response length: {len(full_text)} characters")
                 except Exception as e:
@@ -1328,13 +1337,19 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
                                     messages[i]['content'],
                                     max_tokens=10000  # Even more conservative
                                 )
-                        response = client.chat.completions.create(
-                            model=model_config['models']['code'],
-                            messages=messages,
-                            temperature=0.1,
-                            stream=False
+                        # Combine truncated messages
+                        full_context = "\n\n".join(msg['content'] for msg in messages)
+                        response = chat.send_message(
+                            full_context,
+                            generation_config=genai.types.GenerationConfig(
+                                temperature=0.1,
+                                candidate_count=1,
+                                max_output_tokens=4096
+                            )
                         )
-                        full_text = response.choices[0].message.content
+                        if not response or not response.text:
+                            raise Exception("Empty response from Gemini after truncation")
+                        full_text = response.text
                     else:
                         raise
             else:
