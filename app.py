@@ -855,42 +855,6 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         print(f"System message length: {len(system_message)} characters")
         print(f"User message length: {len(user_message)} characters")
         
-        # Extract and log information about files in context
-        files_info = []
-        current_file = None
-        for line in system_message.split('\n'):
-            if line.startswith('File: '):
-                current_file = line[6:].strip()
-            elif current_file and line.startswith('Content:'):
-                content_lines = 0
-                content_size = 0
-                # Count lines and size until next file or end
-                for content_line in system_message[system_message.find(line):].split('\n'):
-                    if content_line.startswith('File: '):
-                        break
-                    content_lines += 1
-                    content_size += len(content_line)
-                files_info.append({
-                    'path': current_file,
-                    'lines': content_lines - 1,  # Subtract the 'Content:' line
-                    'size': content_size
-                })
-        
-        # Emit detailed status about context files
-        if files_info:
-            file_details = '\n'.join(f"- {f['path']} ({f['lines']} lines, {f['size']} bytes)" for f in files_info)
-            print(f"\nContext files:\n{file_details}")
-            socketio.emit('status', {
-                'message': f'Using {len(files_info)} files as context...',
-                'step': 1,
-                'details': {
-                    'files': files_info,
-                    'total_files': len(files_info),
-                    'total_lines': sum(f['lines'] for f in files_info),
-                    'total_size': sum(f['size'] for f in files_info)
-                }
-            })
-        
         socketio.emit('status', {'message': 'Sending chat request to AI model...', 'step': 1})
         
         start_time = time.time()
@@ -907,6 +871,8 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                 temperature=0.7,
                 max_tokens=4096
             )
+            if not response or not response.content:
+                raise Exception("Empty response from Claude")
             text = response.content[0].text
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
             print(f"Response length: {len(text)} characters")
@@ -926,7 +892,11 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                         temperature=0.7,
                         stream=False  # Don't use streaming for Gemini
                     )
+                    if not response or not response.choices:
+                        raise Exception("Empty response from Gemini")
                     text = response.choices[0].message.content
+                    if not text:
+                        raise Exception("Empty message content from Gemini")
                     print(f"\nResponse received in {time.time() - start_time:.1f}s")
                     print(f"Response length: {len(text)} characters")
                 except Exception as e:
@@ -944,7 +914,11 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                             temperature=0.7,
                             stream=False
                         )
+                        if not response or not response.choices:
+                            raise Exception("Empty response from Gemini after truncation")
                         text = response.choices[0].message.content
+                        if not text:
+                            raise Exception("Empty message content from Gemini after truncation")
                     else:
                         raise
             else:
@@ -990,6 +964,9 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                             })
                             last_update = current_time
                 
+                if not text:
+                    raise Exception("No content received from streaming response")
+                    
                 print(f"\nResponse complete in {time.time() - start_time:.1f}s")
                 print(f"Total response size: {len(text)} characters in {chunk_count} chunks")
 
@@ -1024,7 +1001,7 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
     except Exception as e:
         socketio.emit('status', {'message': f'Error: {str(e)}', 'step': -1})
         print(f"\nError getting chat response: {str(e)}")
-        raise
+        raise Exception(f"Failed to get chat response: {str(e)}")
 
 @app.route('/models', methods=['GET'])
 def get_available_models():
