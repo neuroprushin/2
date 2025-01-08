@@ -44,7 +44,7 @@ AVAILABLE_MODELS = {
         'max_tokens': 100000
     },
     'gemini': {
-        'name': 'Google: Gemini 2.0 Flash',
+        'name': 'Gemini 2.0 Flash Experimental',
         'api_key_env': 'GOOGLE_API_KEY',
         'client_class': 'genai',
         'models': {
@@ -921,32 +921,11 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                 if not response or not response.text:
                     raise Exception("Empty response from Gemini")
                 
-                # Clean up the response text
+                # For chat, just use the text directly
                 full_text = response.text.strip()
+                print(f"\nResponse received in {time.time() - start_time:.1f}s")
+                print(f"Response length: {len(full_text)} characters")
                 
-                # Try to extract JSON if it's wrapped in code blocks
-                if full_text.startswith('```') and full_text.endswith('```'):
-                    full_text = full_text.strip('`').strip()
-                if full_text.startswith('```json'):
-                    full_text = full_text.replace('```json', '', 1).strip()
-                
-                # Try to find JSON content within the response
-                json_start = full_text.find('{')
-                json_end = full_text.rfind('}')
-                
-                if json_start != -1 and json_end != -1 and json_start < json_end:
-                    try:
-                        # Extract and parse the JSON part
-                        json_text = full_text[json_start:json_end + 1]
-                        result = json.loads(json_text)
-                        
-                        if isinstance(result, dict) and 'operations' in result:
-                            return result
-                            
-                    except json.JSONDecodeError:
-                        pass
-                        
-                raise ValueError("Could not get a valid JSON response. Please try again with a clearer prompt.")
             except Exception as e:
                 error_msg = str(e)
                 if "maximum context length" in error_msg.lower():
@@ -969,7 +948,7 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                     )
                     if not response or not response.text:
                         raise Exception("Empty response from Gemini after truncation")
-                    full_text = response.text
+                    full_text = response.text.strip()
                 else:
                     raise
         else:
@@ -985,7 +964,7 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
             socketio.emit('status', {'message': 'Receiving AI response...', 'step': 2})
             
             # Process the streamed response
-            text = ""
+            full_text = ""
             chunk_count = 0
             last_update = time.time()
             update_interval = 0.5
@@ -994,37 +973,34 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
                 if chunk and hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
                     content = chunk.choices[0].delta.content
                     if content is not None:
-                        text += content
+                        full_text += content
                         chunk_count += 1
                     
                     current_time = time.time()
                     if current_time - last_update >= update_interval:
                         elapsed = current_time - start_time
                         tokens_per_second = chunk_count / elapsed if elapsed > 0 else 0
-                        print(f"\rReceived {chunk_count} chunks ({len(text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
+                        print(f"\rReceived {chunk_count} chunks ({len(full_text)} chars) in {elapsed:.1f}s ({tokens_per_second:.1f} chunks/s)", end="")
                         socketio.emit('status', {
-                            'message': f'Receiving chat response... ({len(text)} characters)',
+                            'message': f'Receiving chat response... ({len(full_text)} characters)',
                             'step': 2,
                             'progress': {
                                 'chunks': chunk_count,
-                                'chars': len(text),
+                                'chars': len(full_text),
                                 'elapsed': elapsed,
                                 'rate': tokens_per_second
                             }
                         })
                         last_update = current_time
             
-            if not text:
-                raise Exception("No content received from streaming response")
-            
             print(f"\nResponse complete in {time.time() - start_time:.1f}s")
-            print(f"Total response size: {len(text)} characters in {chunk_count} chunks")
+            print(f"Total response size: {len(full_text)} characters in {chunk_count} chunks")
 
         print("\n=== Step 3: Formatting Response ===")
         socketio.emit('status', {'message': 'Formatting response...', 'step': 3})
         
         # Split text into code blocks and regular text
-        parts = text.split('```')
+        parts = full_text.split('```')
         formatted_parts = []
         
         for i, part in enumerate(parts):
@@ -1377,32 +1353,11 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
                     if not response or not response.text:
                         raise Exception("Empty response from Gemini")
                     
-                    # Clean up the response text
+                    # For chat, just use the text directly
                     full_text = response.text.strip()
+                    print(f"\nResponse received in {time.time() - start_time:.1f}s")
+                    print(f"Response length: {len(full_text)} characters")
                     
-                    # Try to extract JSON if it's wrapped in code blocks
-                    if full_text.startswith('```') and full_text.endswith('```'):
-                        full_text = full_text.strip('`').strip()
-                    if full_text.startswith('```json'):
-                        full_text = full_text.replace('```json', '', 1).strip()
-                    
-                    # Try to find JSON content within the response
-                    json_start = full_text.find('{')
-                    json_end = full_text.rfind('}')
-                    
-                    if json_start != -1 and json_end != -1 and json_start < json_end:
-                        try:
-                            # Extract and parse the JSON part
-                            json_text = full_text[json_start:json_end + 1]
-                            result = json.loads(json_text)
-                            
-                            if isinstance(result, dict) and 'operations' in result:
-                                return result
-                                
-                        except json.JSONDecodeError:
-                            pass
-                            
-                    raise ValueError("Could not get a valid JSON response. Please try again with a clearer prompt.")
                 except Exception as e:
                     error_msg = str(e)
                     if "maximum context length" in error_msg.lower():
@@ -1425,7 +1380,7 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
                         )
                         if not response or not response.text:
                             raise Exception("Empty response from Gemini after truncation")
-                        full_text = response.text
+                        full_text = response.text.strip()
                     else:
                         raise
             else:
