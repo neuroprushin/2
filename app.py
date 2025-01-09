@@ -1715,20 +1715,6 @@ def rename_file():
             'message': str(e)
         }), 500
 
-def init_model_clients():
-    """Initialize API clients for each configured model"""
-    from openai import OpenAI
-    from anthropic import Anthropic
-    
-    if os.getenv('OPENAI_API_KEY'):
-        openai_client = OpenAI()
-        model_clients['deepseek'] = openai_client
-        model_clients['gpt-4'] = openai_client
-        model_clients['gpt-3.5-turbo'] = openai_client
-    
-    if os.getenv('ANTHROPIC_API_KEY'):
-        model_clients['claude'] = Anthropic()  # Use actual Anthropic client
-
 def get_operation_diff(operation, workspace_dir):
     """Generate a diff for a file operation"""
     try:
