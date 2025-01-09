@@ -1022,7 +1022,7 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
             response = client.chat.completions.create(
                 model=model_config['models']['chat'],
                 messages=messages,
-                temperature=1 if model_id == 'o1' or model_id == 'o1-mini' else 0.7,
+                temperature=1 if model_id in ['o1', 'o1-mini'] else 0.7,
                 stream=True
             )
             
@@ -1342,7 +1342,7 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
         print(f"Prompt length: {len(prompt)} characters")
         
         # Create the messages array for the chat
-        if model_id == 'o1':
+        if model_id in ['o1', 'o1-mini']:
             messages = []
             # Combine all system messages into a single user message
             system_content = [system_prompt]
@@ -1466,7 +1466,7 @@ def get_code_suggestion(prompt, files_content=None, workspace_context=None, mode
             response = client.chat.completions.create(
                 model=model_config['models']['code'],
                 messages=messages,
-                temperature=1 if model_id == 'o1' else 0.1,
+                temperature=1 if model_id in ['o1', 'o1-mini'] else 0.1,
                 stream=True
             )
             
