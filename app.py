@@ -64,35 +64,13 @@ AVAILABLE_MODELS = {
         },
         "max_tokens": 100000,
     },
-    "qwen": {
-        "name": "Qwen 2.5 Coder",
-        "api_key_env": "OPENROUTER_API_KEY",
-        "client_class": OpenAI,
-        "base_url": "https://openrouter.ai/api/v1",
-        "models": {
-            "code": "qwen/qwen-2.5-coder-32b-instruct",
-            "chat": "qwen/qwen-2.5-coder-32b-instruct",
-        },
-        "max_tokens": 100000,
-    },
-    "llama": {
-        "name": "Llama 3.3 70B Instruct",
-        "api_key_env": "OPENROUTER_API_KEY",
-        "client_class": OpenAI,
-        "base_url": "https://openrouter.ai/api/v1",
-        "models": {
-            "code": "meta-llama/llama-3.3-70b-instruct",
-            "chat": "meta-llama/llama-3.3-70b-instruct",
-        },
-        "max_tokens": 100000,
-    },
     "claude": {
         "name": "Claude 3.5 Sonnet",
         "api_key_env": "ANTHROPIC_API_KEY",
         "client_class": Anthropic,
         "models": {
             "code": "claude-3-5-sonnet-20241022",
-            "chat": "claude-3-5-sonnet-20241022",
+            "chat": "claude-3-5-sonnet-20241022"
         },
         "max_tokens": 100000,
     },
@@ -1734,9 +1712,44 @@ def get_code_suggestion(prompt,
 
         if json_start != -1 and json_end != -1 and json_start < json_end:
             try:
-                # Extract and parse the JSON part
+                # Extract the JSON part
                 json_text = cleaned_text[json_start:json_end + 1]
-                result = json.loads(json_text)
+                
+                # Preprocess the JSON text to handle triple quotes
+                def preprocess_json(text):
+                    # Split the text into parts by finding all occurrences of triple quotes
+                    parts = []
+                    last_pos = 0
+                    pos = text.find('"""')
+                    
+                    while pos != -1:
+                        # Add the text before the triple quotes
+                        parts.append(text[last_pos:pos])
+                        
+                        # Find the closing triple quotes
+                        end_pos = text.find('"""', pos + 3)
+                        if end_pos == -1:
+                            # If no closing quotes found, treat the rest as normal text
+                            parts.append(text[pos:])
+                            break
+                        
+                        # Get the content between triple quotes and escape it
+                        content = text[pos + 3:end_pos]
+                        escaped_content = content.replace('"', '\\"').replace('\n', '\\n')
+                        parts.append(f'"{escaped_content}"')
+                        
+                        last_pos = end_pos + 3
+                        pos = text.find('"""', last_pos)
+                    
+                    # Add any remaining text
+                    if last_pos < len(text):
+                        parts.append(text[last_pos:])
+                    
+                    return ''.join(parts)
+                
+                # Preprocess the JSON text and parse it
+                processed_json = preprocess_json(json_text)
+                result = json.loads(processed_json)
 
                 if isinstance(result, dict) and "operations" in result:
                     return result
@@ -1744,6 +1757,7 @@ def get_code_suggestion(prompt,
             except json.JSONDecodeError as e:
                 print(f"JSON decode error: {str(e)}")
                 print(f"JSON text: {json_text}")
+                print(f"Processed JSON: {processed_json}")
                 raise ValueError(
                     f"Invalid JSON format: {str(e)}. Please try again with a clearer prompt."
                 )
@@ -1907,6 +1921,7 @@ def list_available_folders():
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 
 @app.route("/workspace/rename_file", methods=["POST"])

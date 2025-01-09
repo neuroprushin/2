@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.13] - 2024-01-14
+
+### Removed
+- Discontinued support for models:
+  - Qwen 2.5 Coder: Removed from available models
+  - Llama 3.3 70B Instruct: Removed from available models
+
+### Changed
+- Updated model selection interface to reflect removed models
+- Simplified model configuration options
+
 ## [0.0.12] - 2024-01-13
 
 ### Added

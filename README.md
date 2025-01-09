@@ -2,14 +2,14 @@
 
 J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of-the-art language models to help you with code generation, modifications, and technical discussions.
 
+![J.A.R.V.I.S.](<public/jarvis.png>)
+
 ## Features
 
 - **Multi-Model Support**: Choose between different AI models for your coding needs:
   - DeepSeek V3
   - Gemini 2.0 Flash Experimental
   - Grok 2
-  - Qwen 2.5 Coder
-  - Llama 3.3 70B Instruct
   - Claude 3.5 Sonnet
   - GPT-4 Turbo
   - GPT-4o Mini
@@ -84,8 +84,9 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 3. Set up your environment variables in `.env`:
    ```
    DEEPSEEK_API_KEY=your_deepseek_api_key
-   GROK_API_KEY=your_grok_api_key
+   OPENROUTER_API_KEY=your_openrouter_api_key
    GOOGLE_API_KEY=your_google_api_key
+   GROK_API_KEY=your_grok_api_key
    ANTHROPIC_API_KEY=your_anthropic_api_key
    OPENAI_API_KEY=your_openai_api_key
    ```
@@ -106,8 +107,6 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 - **DeepSeek Coder V3**: Specialized in code generation and modification
 - **Gemini 2.0 Pro**: Advanced code generation and natural language understanding
 - **Grok 2**: Advanced language model for code and natural language
-- **Qwen 2.5 Coder**: Specialized 32B model for code generation
-- **Llama 3.3 70B Instruct**: Large context window and strong code generation capabilities
 - **Claude 3.5 Sonnet**: Advanced reasoning and code understanding
 - **GPT-4 Turbo**: Latest GPT-4 model with improved performance and up-to-date knowledge
 - **GPT-4o Mini**: Experimental model with specialized capabilities and unique instruction handling
