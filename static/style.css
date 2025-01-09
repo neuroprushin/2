@@ -237,82 +237,377 @@ body {
 
 /* Chat Message Styling */
 .chat-message {
-    padding: 0.5rem 0.75rem;
-    margin: 0.25rem 0;
-    font-size: 0.875rem;
+    padding: 1rem;
+    margin: 0.75rem 0;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    border-radius: 6px;
+    color: var(--text-primary);
 }
 
 .chat-message:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    transition: transform 0.2s ease;
 }
 
 .chat-message.user {
     margin-left: auto;
+    max-width: 85%;
     background: var(--primary);
-    border-bottom-right-radius: 0.25rem;
-    font-size: 0.95rem;
+    border-bottom-right-radius: 2px;
 }
 
 .chat-message.assistant {
     margin-right: auto;
+    max-width: 85%;
     background: var(--bg-hover);
-    border-bottom-left-radius: 0.25rem;
-    font-size: 0.95rem;
+    border-bottom-left-radius: 2px;
 }
 
+/* Code Block Styling */
 .chat-message pre {
     background: var(--bg-dark) !important;
-    margin: 1rem 0;
-    border-radius: 0.5rem;
+    margin: 0.25rem 0 0.1rem 0;
+    padding: 1rem;
+    border-radius: 6px;
     border: 1px solid var(--border-color);
-    max-width: 100%;
     overflow-x: auto;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85em;
+    line-height: 1.45;
+    position: relative;
+}
+
+/* Remove extra spacing after code blocks with negative margin */
+.chat-message pre + p {
+    margin-top: -0.5rem;  /* Negative margin to pull up the following text */
+    margin-bottom: 0.5rem;
+}
+
+/* Adjust paragraph spacing */
+.chat-message p {
+    margin: 0 0 0.5rem 0;
+    line-height: 1.6;
+}
+
+/* Keep spacing before code blocks minimal */
+.chat-message p + pre {
+    margin-top: 0.15rem;
+}
+
+.chat-message p:last-child {
+    margin-bottom: 0;
+}
+
+/* Adjust list spacing */
+.chat-message ul,
+.chat-message ol {
+    margin: 0 0 0.75rem 0;
+    padding-left: 2em;
+}
+
+.chat-message ul:last-child,
+.chat-message ol:last-child {
+    margin-bottom: 0;
+}
+
+/* Adjust blockquote spacing */
+.chat-message blockquote {
+    margin: 0 0 0.75rem 0;
+    padding: 0 1em;
+    color: var(--text-secondary);
+    border-left: 0.25em solid var(--border-color);
+}
+
+.chat-message blockquote:last-child {
+    margin-bottom: 0;
+}
+
+/* Add language label to code blocks */
+.chat-message pre::before {
+    content: attr(data-language);
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    color: var(--text-secondary);
+    background: var(--bg-panel);
+    border-bottom-left-radius: 6px;
+    border-top-right-radius: 6px;
+    border-left: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
 }
 
 .chat-message code {
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 0.9em;
-    line-height: 1.5;
+    font-size: 0.85em;
+    padding: 0.2em 0.4em;
+    margin: 0;
+    background-color: rgba(110, 118, 129, 0.4);
+    border-radius: 6px;
+}
+
+.chat-message pre code {
+    background: none;
+    padding: 0;
+    font-size: 1em;
+    color: var(--text-primary);
     white-space: pre;
     word-wrap: normal;
+    tab-size: 2;
 }
 
-.chat-message h1, 
-.chat-message h2, 
-.chat-message h3, 
-.chat-message h4, 
-.chat-message h5, 
+/* Markdown Content Styling */
+.chat-message h1,
+.chat-message h2,
+.chat-message h3,
+.chat-message h4,
+.chat-message h5,
 .chat-message h6 {
-    color: var(--text-bright);
+    margin-top: 24px;
+    margin-bottom: 16px;
     font-weight: 600;
-    margin-top: 1.5rem;
-    margin-bottom: 0.75rem;
+    line-height: 1.25;
+    color: var(--text-bright);
 }
+
+.chat-message h1 {
+    font-size: 2em;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.3em;
+}
+
+.chat-message h2 {
+    font-size: 1.5em;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.3em;
+}
+
+.chat-message h3 { font-size: 1.25em; }
+.chat-message h4 { font-size: 1em; }
+.chat-message h5 { font-size: 0.875em; }
+.chat-message h6 { font-size: 0.85em; }
 
 .chat-message p {
-    margin-bottom: 0.75rem;
+    margin: 0 0 16px 0;
+    line-height: 1.6;
 }
 
-.chat-message ul, 
+.chat-message ul,
 .chat-message ol {
-    margin: 0.75rem 0;
-    padding-left: 1.5rem;
+    margin: 0 0 16px 0;
+    padding-left: 2em;
+}
+
+.chat-message ul ul,
+.chat-message ul ol,
+.chat-message ol ul,
+.chat-message ol ol {
+    margin: 8px 0;
 }
 
 .chat-message li {
-    margin: 0.375rem 0;
+    margin: 0.25em 0;
+}
+
+.chat-message li + li {
+    margin-top: 0.25em;
+}
+
+.chat-message blockquote {
+    margin: 0 0 16px 0;
+    padding: 0 1em;
+    color: var(--text-secondary);
+    border-left: 0.25em solid var(--border-color);
+}
+
+.chat-message blockquote > :first-child {
+    margin-top: 0;
+}
+
+.chat-message blockquote > :last-child {
+    margin-bottom: 0;
+}
+
+.chat-message table {
+    margin: 0 0 16px 0;
+    border-spacing: 0;
+    border-collapse: collapse;
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow: auto;
+}
+
+.chat-message table th,
+.chat-message table td {
+    padding: 6px 13px;
+    border: 1px solid var(--border-color);
+}
+
+.chat-message table tr {
+    background-color: transparent;
+    border-top: 1px solid var(--border-color);
+}
+
+.chat-message table tr:nth-child(2n) {
+    background-color: rgba(110, 118, 129, 0.1);
+}
+
+.chat-message hr {
+    height: 0.25em;
+    padding: 0;
+    margin: 24px 0;
+    background-color: var(--border-color);
+    border: 0;
 }
 
 .chat-message a {
-    color: var(--primary);
+    color: #58a6ff;
     text-decoration: none;
-    border-bottom: 1px solid transparent;
-    transition: border-color 0.2s ease;
 }
 
 .chat-message a:hover {
-    border-bottom-color: var(--primary);
+    text-decoration: underline;
+}
+
+.chat-message img {
+    max-width: 100%;
+    height: auto;
+    margin: 0 0 16px 0;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+/* Task Lists */
+.chat-message ul.contains-task-list {
+    padding-left: 0;
+    list-style: none;
+}
+
+.chat-message .task-list-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5em;
+    margin: 0.25em 0;
+}
+
+.chat-message .task-list-item input[type="checkbox"] {
+    margin: 0.2em 0 0 0;
+}
+
+/* Syntax Highlighting */
+.chat-message .hljs {
+    display: block;
+    overflow-x: auto;
+    padding: 1em;
+    color: var(--text-primary);
+    background: var(--bg-dark);
+}
+
+.chat-message .hljs-comment,
+.chat-message .hljs-quote {
+    color: #8b949e;
+    font-style: italic;
+}
+
+.chat-message .hljs-keyword,
+.chat-message .hljs-selector-tag {
+    color: #ff7b72;
+}
+
+.chat-message .hljs-string,
+.chat-message .hljs-doctag,
+.chat-message .hljs-template-variable {
+    color: #a5d6ff;
+}
+
+.chat-message .hljs-title,
+.chat-message .hljs-section,
+.chat-message .hljs-selector-id {
+    color: #d2a8ff;
+    font-weight: bold;
+}
+
+.chat-message .hljs-variable,
+.chat-message .hljs-template-variable {
+    color: #79c0ff;
+}
+
+.chat-message .hljs-type,
+.chat-message .hljs-class {
+    color: #ffa657;
+}
+
+.chat-message .hljs-number {
+    color: #79c0ff;
+}
+
+.chat-message .hljs-built_in,
+.chat-message .hljs-builtin-name {
+    color: #ffa657;
+}
+
+.chat-message .hljs-attr {
+    color: #79c0ff;
+}
+
+.chat-message .hljs-symbol,
+.chat-message .hljs-bullet {
+    color: #a5d6ff;
+}
+
+.chat-message .hljs-link {
+    color: #58a6ff;
+    text-decoration: underline;
+}
+
+.chat-message .hljs-deletion {
+    color: #ffa198;
+}
+
+.chat-message .hljs-addition {
+    color: #7ee787;
+}
+
+/* Special Formatting */
+.chat-message kbd {
+    display: inline-block;
+    padding: 0.2em 0.4em;
+    font-size: 0.85em;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    line-height: 1;
+    color: var(--text-primary);
+    vertical-align: middle;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: inset 0 -1px 0 var(--border-color);
+}
+
+.chat-message details {
+    margin: 0 0 16px 0;
+}
+
+.chat-message summary {
+    cursor: pointer;
+    padding: 8px 0;
+}
+
+.chat-message details[open] summary {
+    margin-bottom: 8px;
+}
+
+/* Inline Code Highlighting */
+.chat-message :not(pre) > code {
+    padding: 0.2em 0.4em;
+    margin: 0;
+    font-size: 85%;
+    background-color: rgba(110, 118, 129, 0.4);
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
 /* Modal Styling */

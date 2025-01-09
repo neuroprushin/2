@@ -1106,12 +1106,24 @@ function clearChatHistory() {
 }
 
 function formatChatResponse(text) {
-    // Configure marked options
+    // Configure marked options for GitHub-like rendering
     marked.setOptions({
-        breaks: true,  // Convert line breaks
-        gfm: true,     // Use GitHub Flavored Markdown
-        headerIds: false,
-        mangle: false
+        gfm: true,                // GitHub Flavored Markdown
+        breaks: true,             // Add <br> on single line breaks
+        headerIds: true,          // Add ids to headers
+        mangle: false,            // Don't escape header IDs
+        pedantic: false,          // Don't be too strict
+        smartLists: true,         // Use smarter list behavior
+        smartypants: true,        // Use smart punctuation
+        highlight: function(code, lang) {
+            // Add syntax highlighting classes
+            if (lang && hljs.getLanguage(lang)) {
+                try {
+                    return hljs.highlight(code, { language: lang }).value;
+                } catch (err) {}
+            }
+            return code;
+        }
     });
 
     // Split text into code blocks and regular text
@@ -1124,11 +1136,10 @@ function formatChatResponse(text) {
             let regularText = parts[i].trim();
             if (regularText) {
                 regularText = marked.parse(regularText);
-                regularText = regularText.replace(/\s+$/, '');
                 formattedParts.push(regularText);
             }
         } else {
-            // Code block: preserve original formatting
+            // Code block: preserve formatting and add syntax highlighting
             let code = parts[i];
             let language = '';
             
@@ -1139,33 +1150,40 @@ function formatChatResponse(text) {
                 code = code.substring(firstLineBreak + 1);
             }
             
-            // Clean up code: remove extra newlines and spaces
+            // Clean up code
             code = code.trim()
-                .replace(/\n\s*\n/g, '\n') // Remove empty lines
-                .replace(/[ \t]+$/gm, '') // Remove trailing spaces from each line
+                .replace(/\n\s*\n/g, '\n')  // Remove empty lines
+                .replace(/[ \t]+$/gm, '')   // Remove trailing spaces
                 .replace(/^\s+|\s+$/g, ''); // Remove leading/trailing spaces
             
-            // Preserve original formatting
+            // Escape HTML entities
             code = code
+                .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
 
-            formattedParts.push(`<pre class="bg-gray-800 p-4 rounded-lg overflow-x-auto font-mono text-sm"><code class="language-${language}">${code}</code></pre>`);
+            // Apply syntax highlighting if language is specified
+            if (language && hljs.getLanguage(language)) {
+                try {
+                    code = hljs.highlight(code, { language: language }).value;
+                } catch (err) {}
+            }
+
+            // Create code block with language label
+            formattedParts.push(`<pre data-language="${language || 'plaintext'}" class="code-block"><code class="language-${language || 'plaintext'}">${code}</code></pre>`);
         }
     }
     
     // Join parts and clean up
-    let result = formattedParts.join('');
+    let result = formattedParts.join('\n');
     
-    // Clean up any remaining unwanted tags or spaces
-    result = result.replace(/\s*<br\s*\/?>\s*<br\s*\/?>\s*/g, '<br>');
-    result = result.replace(/\s*<br\s*\/?>\s*<\/p>/g, '</p>');
-    result = result.replace(/<p>\s*<br\s*\/?>\s*/g, '<p>');
-    result = result.replace(/\s+$/g, '');
-    result = result.replace(/<\/pre>\s+<p>/g, '</pre><p>');
-    result = result.replace(/<\/p>\s+<pre>/g, '</p><pre>');
+    // Clean up any unwanted tags or spaces
+    result = result
+        .replace(/<\/pre>\s+<p>/g, '</pre><p>')
+        .replace(/<\/p>\s+<pre>/g, '</p><pre>')
+        .replace(/\s+$/g, '');
     
     return result;
 }
