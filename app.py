@@ -107,7 +107,7 @@ AVAILABLE_MODELS = {
         'max_tokens': 100000
     },
     'gpt-4o-mini': {
-        'name': 'GPT-4o Mini',
+        'name': 'GPT-4o-mini',
         'api_key_env': 'OPENAI_API_KEY',
         'client_class': OpenAI,
         'models': {
@@ -127,7 +127,7 @@ AVAILABLE_MODELS = {
         'max_tokens': 100000
     },
     'o1-mini': {
-        'name': 'o1 Mini',
+        'name': 'o1-mini',
         'api_key_env': 'OPENAI_API_KEY',
         'client_class': OpenAI,
         'models': {
@@ -137,7 +137,7 @@ AVAILABLE_MODELS = {
         'max_tokens': 100000
     },
     'o1': {
-        'name': 'o1 Preview',
+        'name': 'o1-preview',
         'api_key_env': 'OPENAI_API_KEY',
         'client_class': OpenAI,
         'models': {
@@ -910,7 +910,7 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
         print(f"Model: {model_id}")
         
         # Create messages array for the chat
-        if model_id == 'o1' or model_id == 'o1-mini':
+        if model_id == 'o1-mini' or model_id == 'o1':
             # For o1 model, combine system message and user message
             messages = [
                 {"role": "user", "content": f"{system_message}\n\nUser request: {user_message}"}
@@ -1022,7 +1022,7 @@ def get_chat_response(system_message, user_message, model_id='deepseek'):
             response = client.chat.completions.create(
                 model=model_config['models']['chat'],
                 messages=messages,
-                temperature=1 if model_id in ['o1', 'o1-mini'] else 0.7,
+                temperature=1 if model_id in ['o1-mini', 'o1'] else 0.7,
                 stream=True
             )
             
