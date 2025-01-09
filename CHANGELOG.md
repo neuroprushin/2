@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.12] - 2024-01-13
+
+### Added
+- New OpenAI models:
+  - GPT-4o Mini: Experimental model with specialized capabilities
+  - o1 Mini: Compact version of o1 Preview model
+- Enhanced model compatibility:
+  - Adjusted temperature settings for new models
+  - Improved message handling for specialized models
+  - Optimized streaming responses
+
+### Fixed
+- Temperature parameter handling for new models
+- System message format for model compatibility
+- Model-specific parameter validation
+
 ## [0.0.11] - 2024-01-12
 
 ### Added
