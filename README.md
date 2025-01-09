@@ -5,7 +5,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 ## Features
 
 - **Multi-Model Support**: Choose between different AI models for your coding needs:
-  - DeepSeek Coder V3
+  - DeepSeek V3
   - Gemini 2.0 Flash Experimental
   - Grok 2
   - Qwen 2.5 Coder
@@ -14,8 +14,8 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
   - GPT-4 Turbo
   - GPT-4o Mini
   - GPT-4o
-  - o1 Mini
-  - o1 Preview
+  - o1-mini
+  - o1-preview
 
 - **File Attachment Support**:
   - PDF files with text extraction
@@ -112,8 +112,8 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 - **GPT-4 Turbo**: Latest GPT-4 model with improved performance and up-to-date knowledge
 - **GPT-4o Mini**: Experimental model with specialized capabilities and unique instruction handling
 - **GPT-4o**: Optimized GPT-4 variant with enhanced code understanding
-- **o1 Mini**: Experimental model with specialized capabilities and unique instruction handling
-- **o1 Preview**: Experimental model with specialized capabilities and unique instruction handling
+- **o1-mini**: Experimental model with specialized capabilities and unique instruction handling
+- **o1-preview**: Experimental model with specialized capabilities and unique instruction handling
 
 ## Contributing
 

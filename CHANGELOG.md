@@ -6,8 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - New OpenAI models:
-  - GPT-4o Mini: Experimental model with specialized capabilities
-  - o1 Mini: Compact version of o1 Preview model
+  - GPT-4o-mini: Experimental model with specialized capabilities
+  - o1-mini: Compact version of o1 Preview model
 - Enhanced model compatibility:
   - Adjusted temperature settings for new models
   - Improved message handling for specialized models
