@@ -1330,26 +1330,39 @@ def run_linter(file_path):
 
         # Skip binary or non-code files
         binary_extensions = {
-            ".pyc",
-            ".pyo",
-            ".so",
-            ".dll",
-            ".exe",
-            ".bin",
-            ".jpg",
-            ".png",
-            ".gif",
+            ".pyc", ".pyo", ".so", ".dll", ".exe", ".bin",
+            ".jpg", ".png", ".gif", ".pdf", ".doc", ".docx"
         }
         if file_ext in binary_extensions:
             return True
 
-        # Run pylama directly as a subprocess
-        result = subprocess.run(["pylama", file_path],
-                                capture_output=True,
-                                text=True)
+        # Only run linter on supported file types
+        supported_extensions = {".py", ".js", ".jsx", ".ts", ".tsx"}
+        if file_ext not in supported_extensions:
+            return True
 
-        # Return True if no issues found (exit code 0)
-        return result.returncode == 0
+        # Run pylama with appropriate configuration
+        try:
+            result = subprocess.run(
+                ["pylama", file_path],
+                capture_output=True,
+                text=True,
+                timeout=30  # Add timeout to prevent hanging
+            )
+            # Print linting output for debugging
+            if result.stdout or result.stderr:
+                print(f"\nLinting output for {file_path}:")
+                if result.stdout:
+                    print("stdout:", result.stdout)
+                if result.stderr:
+                    print("stderr:", result.stderr)
+            return result.returncode == 0
+        except subprocess.TimeoutExpired:
+            print(f"Linting timeout for {file_path}")
+            return False
+        except subprocess.CalledProcessError as e:
+            print(f"Linting process error for {file_path}: {e}")
+            return False
 
     except Exception as e:
         print(f"Linting error for {file_path}: {str(e)}")
@@ -1754,7 +1767,11 @@ def get_code_suggestion(prompt,
                     if last_pos < len(text):
                         parts.append(text[last_pos:])
                     
-                    return ''.join(parts)
+                    # Join parts and normalize quotes
+                    result = ''.join(parts)
+                    # Replace curly quotes with straight quotes
+                    result = result.replace('"', '"').replace('"', '"')
+                    return result
                 
                 # Preprocess the JSON text and parse it
                 processed_json = preprocess_json(json_text)
@@ -1887,9 +1904,9 @@ def list_available_folders():
                                     sum(
                                         os.path.getsize(
                                             os.path.join(dirpath, filename))
-                                        for dirpath, dirnames, filenames in
-                                        os.walk(full_path)
-                                        for filename in filenames),
+                                            for dirpath, dirnames, filenames in
+                                            os.walk(full_path)
+                                            for filename in filenames),
                                     "files":
                                     sum(
                                         len(files)

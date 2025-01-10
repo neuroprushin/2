@@ -1200,14 +1200,20 @@ class WorkspaceManager:
                             result = subprocess.run(["pylama", tmp_path],
                                                     capture_output=True,
                                                     text=True)
+                            # Combine stdout and stderr for complete output
                             operation["lint_output"] = result.stdout
+                            if result.stderr:
+                                operation["lint_output"] += "\n" + result.stderr
                             operation["lint_passed"] = result.returncode == 0
                         except Exception as e:
                             print(f"Linting error: {str(e)}")
-                            operation["lint_output"] = str(e)
+                            operation["lint_output"] = f"Linting failed: {str(e)}"
                             operation["lint_passed"] = False
                         finally:
-                            os.unlink(tmp_path)
+                            try:
+                                os.unlink(tmp_path)
+                            except Exception as e:
+                                print(f"Failed to cleanup temp file: {str(e)}")
                     else:
                         # Non-Python files don't need linting
                         operation["lint_passed"] = True
@@ -1242,14 +1248,20 @@ class WorkspaceManager:
                             result = subprocess.run(["pylama", tmp_path],
                                                     capture_output=True,
                                                     text=True)
+                            # Combine stdout and stderr for complete output
                             operation["lint_output"] = result.stdout
+                            if result.stderr:
+                                operation["lint_output"] += "\n" + result.stderr
                             operation["lint_passed"] = result.returncode == 0
                         except Exception as e:
                             print(f"Linting error: {str(e)}")
-                            operation["lint_output"] = str(e)
+                            operation["lint_output"] = f"Linting failed: {str(e)}"
                             operation["lint_passed"] = False
                         finally:
-                            os.unlink(tmp_path)
+                            try:
+                                os.unlink(tmp_path)
+                            except Exception as e:
+                                print(f"Failed to cleanup temp file: {str(e)}")
                     else:
                         # Non-Python files don't need linting
                         operation["lint_passed"] = True
