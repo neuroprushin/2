@@ -1379,7 +1379,7 @@ function getOperationIcon(type) {
     const icons = {
         'create_file': 'fa-file-plus text-green-500',
         'edit_file': 'fa-file-edit text-blue-500',
-        'remove_file': 'fa-file-minus text-red-500'
+        'remove_file': 'fa-trash text-red-500'
     };
     return icons[type] || 'fa-file text-gray-500';
 }
