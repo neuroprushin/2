@@ -1328,17 +1328,22 @@ def run_linter(file_path):
         # Get file extension
         file_ext = Path(file_path).suffix.lower()
 
-        # Skip binary or non-code files
+        # Skip binary files and common non-text formats
         binary_extensions = {
+            # Binary files
             ".pyc", ".pyo", ".so", ".dll", ".exe", ".bin",
-            ".jpg", ".png", ".gif", ".pdf", ".doc", ".docx"
+            # Images
+            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".ico", ".webp",
+            # Documents
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+            # Archives
+            ".zip", ".tar", ".gz", ".rar", ".7z",
+            # Media
+            ".mp3", ".mp4", ".avi", ".mov", ".wav",
+            # Other binaries
+            ".db", ".sqlite", ".class", ".o"
         }
         if file_ext in binary_extensions:
-            return True
-
-        # Only run linter on supported file types
-        supported_extensions = {".py", ".js", ".jsx", ".ts", ".tsx"}
-        if file_ext not in supported_extensions:
             return True
 
         # Run pylama with appropriate configuration
