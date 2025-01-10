@@ -621,7 +621,7 @@ def process_prompt():
         data = request.json
         prompt = data.get("prompt")
         workspace_dir = data.get("workspace_dir")
-        model_id = data.get("model_id", "deepseek")
+        model_id = data.get("model_id")
         attachments = data.get("attachments", [])
         context_path = data.get("context_path")  # Get the context path
 
@@ -629,6 +629,12 @@ def process_prompt():
             return jsonify({
                 "status": "error",
                 "message": "No prompt provided"
+            }), 400
+
+        if not model_id:
+            return jsonify({
+                "status": "error",
+                "message": "No model selected"
             }), 400
 
         if not workspace_dir:
@@ -875,12 +881,15 @@ def chat():
         data = request.json
         prompt = data.get("prompt")
         workspace_dir = data.get("workspace_dir")
-        model_id = data.get("model_id", "deepseek")
+        model_id = data.get("model_id")
         attachments = data.get("attachments", [])
         context_path = data.get("context_path")  # Get the context path
 
         if not prompt:
             return jsonify({"error": "No prompt provided"}), 400
+
+        if not model_id:
+            return jsonify({"error": "No model selected"}), 400
 
         if not workspace_dir or not os.path.exists(workspace_dir):
             return jsonify({"error": "Invalid workspace directory"}), 400
