@@ -43,31 +43,15 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Start PowerShell with minimal configuration
-            self.pty.spawn('powershell.exe -NoLogo')
+            # Start PowerShell with minimal configuration and set initial window
+            startup_command = (
+                'powershell.exe -NoLogo -NoExit -Command "'
+                '$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(%d, 1000); '
+                '$Host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size(%d, %d); '
+                'Clear-Host"'
+            ) % (cols, cols, rows)
             
-            # Wait a bit for PowerShell to initialize
-            time.sleep(0.1)
-            
-            # Configure PowerShell window and buffer size
-            # We need to set buffer size first, and it must be at least as large as the window
-            size_commands = [
-                # Clear the screen to prevent output mess
-                'Clear-Host;',
-                # Set buffer size first (make it same as window size for now)
-                '$bufferSize = New-Object System.Management.Automation.Host.Size(%d, %d);' % (cols, 9999),
-                '$Host.UI.RawUI.BufferSize = $bufferSize;',
-                # Then set window size
-                '$windowSize = New-Object System.Management.Automation.Host.Size(%d, %d);' % (cols, rows),
-                '$Host.UI.RawUI.WindowSize = $windowSize;',
-                # Clear again after resize
-                'Clear-Host'
-            ]
-            
-            # Send commands
-            for cmd in size_commands:
-                self.pty.write(cmd + '\r\n')
-                time.sleep(0.05)  # Small delay between commands
+            self.pty.spawn(startup_command)
             
             # Start reading thread
             self.running = True
@@ -145,20 +129,17 @@ class TerminalManager:
         if self.is_windows:
             if self.pty:
                 try:
-                    # Send resize commands to PowerShell
-                    size_commands = [
-                        # Set buffer size first (make it same as window size for now)
-                        '$bufferSize = New-Object System.Management.Automation.Host.Size(%d, %d);' % (cols, 9999),
-                        '$Host.UI.RawUI.BufferSize = $bufferSize;',
-                        # Then set window size
-                        '$windowSize = New-Object System.Management.Automation.Host.Size(%d, %d);' % (cols, rows),
-                        '$Host.UI.RawUI.WindowSize = $windowSize;'
-                    ]
+                    # PowerShell requires buffer width to match window width
+                    # and buffer height must be >= window height
+                    resize_command = (
+                        '$width = %d; $height = %d; '
+                        'if ($Host.UI.RawUI.BufferSize.Width -ne $width) {'
+                        '    $Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size($width, 1000);'
+                        '};'
+                        '$Host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size($width, $height)'
+                    ) % (cols, rows)
                     
-                    # Send commands
-                    for cmd in size_commands:
-                        self.pty.write(cmd + '\r\n')
-                        time.sleep(0.05)  # Small delay between commands
+                    self.pty.write(resize_command + '\r\n')
                 except Exception as e:
                     print(f"Failed to resize Windows terminal: {e}")
         else:
