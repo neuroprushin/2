@@ -29,10 +29,10 @@ class TerminalManager:
         self.is_windows = platform.system() == 'Windows'
         self.pty = None
         self.read_thread = None
-        self.output_buffer = []
-        self.last_emit_time = 0
+        self.workspace_dir = None
 
-    def start(self, cols, rows):
+    def start(self, cols, rows, workspace_dir=None):
+        self.workspace_dir = workspace_dir or os.getcwd()
         if self.is_windows:
             self._start_windows_terminal(cols, rows)
         else:
@@ -43,15 +43,27 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Get workspace directory
-            workspace_dir = os.getcwd()
+            # Start cmd.exe first
+            self.pty.spawn('cmd.exe')
             
-            # Start cmd.exe with UTF-8, proper window size, and change to workspace directory
-            # /k keeps the window open after commands
-            # mode CON: sets the console window and buffer size
-            # cd /d changes drive and directory
-            startup_command = f'cmd.exe /k "cd /d {workspace_dir} && mode CON: COLS={cols} LINES={rows}"'
-            self.pty.spawn(startup_command)
+            # Wait a bit for cmd to initialize
+            time.sleep(0.1)
+            
+            # Get the workspace path from the environment or current directory
+            workspace_path = self.workspace_dir
+            if workspace_path.startswith('/home'):
+                # Convert WSL path to Windows path if needed
+                workspace_path = workspace_path.replace('/home', 'C:\\Users')
+            workspace_path = workspace_path.replace('/', '\\')
+            
+            print(f"Changing to directory: {workspace_path}")  # Debug print
+            
+            # Send commands one by one
+            self.pty.write(f'cd /d "{workspace_path}\workspaces"\r\n')
+            time.sleep(0.1)
+            self.pty.write('cls\r\n')
+            time.sleep(0.1)
+            self.pty.write(f'mode CON: COLS={cols} LINES={rows}\r\n')
             
             # Start reading thread
             self.running = True
@@ -172,9 +184,6 @@ class TerminalManager:
         # Choose shell based on environment
         shell = os.environ.get('SHELL', '/bin/bash')
         
-        # Get workspace directory
-        workspace_dir = os.getcwd()
-        
         # Create PTY and fork process
         self.pid, self.fd = pty.fork()
         
@@ -184,10 +193,7 @@ class TerminalManager:
                 os.environ['TERM'] = 'xterm-256color'
                 os.environ['COLORTERM'] = 'truecolor'
                 
-                # Change to workspace directory
-                os.chdir(workspace_dir)
-                
-                # Execute shell
+                # Start shell
                 os.execvp(shell, [shell])
             except Exception as e:
                 print(f"Failed to execute shell: {e}")
@@ -196,6 +202,18 @@ class TerminalManager:
             try:
                 # Set terminal size
                 self.resize_terminal(cols, rows)
+                
+                # Wait a bit for shell to initialize
+                time.sleep(0.1)
+                
+                # Get the workspace path
+                workspace_path = self.workspace_dir
+                print(f"Changing to directory: {workspace_path}")  # Debug print
+                
+                # Send commands one by one
+                os.write(self.fd, f'cd "{workspace_path}/workspaces"\n'.encode())
+                time.sleep(0.1)
+                os.write(self.fd, 'clear\n'.encode())
                 
                 # Start reading thread
                 self.running = True
