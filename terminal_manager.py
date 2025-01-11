@@ -111,23 +111,50 @@ class TerminalManager:
 
     def _clean_terminal_output(self, output):
         """Clean up terminal output by handling control sequences"""
-        # Remove common terminal control sequences that might make output messy
-        output = output.replace('\r\n', '\n')  # Normalize line endings
-        output = output.replace('\r', '\n')    # Convert lone \r to \n
+        # Handle PowerShell-specific output patterns
+        if self.is_windows:
+            # Remove the timestamp pattern that appears in the screenshot
+            output = output.replace('\x1b[?25h', '')  # Remove cursor show
+            output = output.replace('\x1b[?25l', '')  # Remove cursor hide
+            
+            # Remove PowerShell's timestamp lines
+            lines = output.split('\n')
+            cleaned_lines = []
+            for line in lines:
+                # Skip the timestamp lines that match the pattern shown in the screenshot
+                if not (line.startswith('-a----') or 
+                       line.strip().endswith('PM') or 
+                       line.strip().endswith('AM') or
+                       line.strip().isdigit() or
+                       line.strip() == ''):
+                    cleaned_lines.append(line)
+            
+            output = '\n'.join(cleaned_lines)
+            
+            # Clean up the prompt to show only PS path>
+            output = output.replace('\x1b[0m', '')  # Remove color reset
+            output = output.replace('\x1b[91m', '')  # Remove red color
+            output = output.replace('\x1b[93m', '')  # Remove yellow color
+            output = output.replace('\x1b[92m', '')  # Remove green color
+            output = output.replace('\x1b[94m', '')  # Remove blue color
+            output = output.replace('\x1b[96m', '')  # Remove cyan color
+            output = output.replace('\x1b[97m', '')  # Remove white color
+            
+            # Remove other common ANSI sequences
+            output = output.replace('\x1b[G', '')    # Cursor horizontal absolute
+            output = output.replace('\x1b[K', '')    # Clear line
+            output = output.replace('\x1b[J', '')    # Clear screen
+            output = output.replace('\x1b[H', '')    # Cursor home
+            
+            # Normalize line endings
+            output = output.replace('\r\n', '\n')
+            output = output.replace('\r', '\n')
+            
+            # Remove multiple consecutive newlines
+            while '\n\n\n' in output:
+                output = output.replace('\n\n\n', '\n\n')
         
-        # Remove common terminal control sequences
-        control_sequences = [
-            '\x1b[?25l',  # Hide cursor
-            '\x1b[?25h',  # Show cursor
-            '\x1b[H',     # Home position
-            '\x1b[2J',    # Clear screen
-            '\x1b[K',     # Clear line
-        ]
-        
-        for seq in control_sequences:
-            output = output.replace(seq, '')
-        
-        return output
+        return output.strip()
 
     def write(self, data):
         if self.is_windows:
