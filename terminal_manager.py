@@ -127,14 +127,27 @@ class TerminalManager:
         if self.is_windows:
             if self.pty:
                 try:
-                    # Ensure input is processed as a single operation
-                    with threading.Lock():
-                        self.pty.write(data)
+                    # Handle cd command for Windows
+                    if data.startswith('cd "') and data.endswith('"\n'):
+                        path = data[4:-2]  # Extract path from cd "path"\n
+                        # Convert Unix-style path to Windows path if needed
+                        if path.startswith("/home"):
+                            path = path.replace("/home", "C:\\Users")
+                        path = path.replace("/", "\\")
+                        # Use /d switch for cross-drive directory changes
+                        windows_cmd = f'cd /d "{path}"\r\n'
+                        with threading.Lock():
+                            self.pty.write(windows_cmd)
+                    else:
+                        # Ensure input is processed as a single operation
+                        with threading.Lock():
+                            self.pty.write(data)
                 except Exception as e:
                     print(f"Failed to write to Windows terminal: {e}")
         else:
             if self.fd is not None:
                 try:
+                    # For Unix, send the command as is
                     os.write(self.fd, data.encode())
                 except Exception as e:
                     print(f"Failed to write to terminal: {e}")
