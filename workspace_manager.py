@@ -240,38 +240,31 @@ class WorkspaceManager:
         self.logger = logging.getLogger("WorkspaceManager")
         self.logger.setLevel(logging.DEBUG)
 
-        # Create handlers
+        # Setup console handler
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
-
-        # Delete existing log file if it exists
-        if os.path.exists(log_file):
-            try:
-                os.remove(log_file)
-            except Exception as e:
-                print(f"Failed to delete old log file: {e}")
-
-        # Create file handler
-        log_file = os.path.join(workspace_root, "workspace_manager.log")
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(logging.DEBUG)
-
-        # Create formatters and add it to handlers
-        console_format = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s")
-        file_format = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s"
-        )
-
+        console_format = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         console_handler.setFormatter(console_format)
-        file_handler.setFormatter(file_format)
-
-        # Add handlers to the logger
         self.logger.addHandler(console_handler)
-        self.logger.addHandler(file_handler)
 
-        self.logger.info(
-            f"Initializing WorkspaceManager with root: {workspace_root}")
+        # Setup file handler
+        try:
+            log_file = os.path.join(workspace_root, "workspace_manager.log")
+            if os.path.exists(log_file):
+                try:
+                    os.remove(log_file)
+                except Exception as e:
+                    print(f"Failed to delete old log file: {e}")
+            
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setLevel(logging.DEBUG)
+            file_format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s")
+            file_handler.setFormatter(file_format)
+            self.logger.addHandler(file_handler)
+        except Exception as e:
+            print(f"Failed to setup file logging: {e}")
+
+        self.logger.info(f"Initializing WorkspaceManager with root: {workspace_root}")
 
         # Initialize BM25 search
         self.search_index = BM25Search()

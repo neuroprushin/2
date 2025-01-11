@@ -6,6 +6,15 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 
 ## Features
 
+- **Integrated Terminal**:
+  - Cross-platform terminal support (Windows and Linux)
+  - Automatic workspace directory initialization
+  - Full xterm.js integration
+  - Real-time output streaming
+  - Command history support
+  - Proper directory tracking
+  - Native shell integration (cmd.exe on Windows, bash on Linux)
+
 - **Multi-Model Support**: Choose between different AI models for your coding needs:
   - DeepSeek V3
   - Gemini 2.0 Flash Experimental
