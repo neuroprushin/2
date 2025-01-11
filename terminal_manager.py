@@ -43,17 +43,8 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Start PowerShell with proper configuration for escape sequences
-            startup_command = (
-                'powershell.exe -NoLogo -NoExit '
-                '-Command "$PSStyle.OutputRendering=\'Ansi\'; '
-                '$env:TERM=\'xterm\'; '
-                '$OutputEncoding=[System.Text.Encoding]::UTF8; '
-                '[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; '
-                '[System.Console]::InputEncoding=[System.Text.Encoding]::UTF8; '
-                'function prompt { \"`e[32m$($executionContext.SessionState.Path.CurrentLocation)\`e[0m> \" }"'
-            )
-            self.pty.spawn(startup_command)
+            # Start cmd.exe with minimal configuration
+            self.pty.spawn('cmd.exe')
             
             # Start reading thread
             self.running = True
@@ -72,10 +63,7 @@ class TerminalManager:
                 # Read available data
                 data = self.pty.read()
                 if data:
-                    # Clean and emit the output directly
-                    cleaned = self._clean_terminal_output(data)
-                    if cleaned:
-                        self.socket.emit('terminal_output', cleaned)
+                    self.socket.emit('terminal_output', data)
                 time.sleep(0.001)  # Tiny sleep to prevent CPU hogging
             except Exception as e:
                 if 'EOF' not in str(e):  # Don't print EOF errors
@@ -105,7 +93,7 @@ class TerminalManager:
         if self.is_windows:
             if self.pty:
                 try:
-                    # Normalize line endings for Windows
+                    # Ensure proper line endings for Windows
                     data = data.replace('\n', '\r\n')
                     self.pty.write(data)
                 except Exception as e:
