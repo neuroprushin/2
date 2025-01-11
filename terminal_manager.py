@@ -43,14 +43,8 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Start PowerShell with specific configuration to minimize noise
-            startup_command = (
-                'powershell.exe -NoLogo -NoProfile '
-                '$Host.UI.RawUI.WindowTitle = "Terminal"; '
-                'Remove-Item alias:ls; '
-                'function prompt { "PS " + (Get-Location) + "> " }'
-            )
-            self.pty.spawn(startup_command)
+            # Start PowerShell with minimal configuration
+            self.pty.spawn('powershell.exe -NoLogo')
             
             # Start reading thread
             self.running = True
@@ -69,83 +63,29 @@ class TerminalManager:
                 # Read available data
                 data = self.pty.read()
                 if data:
-                    try:
-                        # Process the data
-                        self._process_windows_output(data)
-                    except Exception as e:
-                        print(f"Error processing terminal output: {e}")
+                    # Clean and emit the output directly
+                    cleaned = self._clean_terminal_output(data)
+                    if cleaned:
+                        self.socket.emit('terminal_output', cleaned)
                 time.sleep(0.001)  # Tiny sleep to prevent CPU hogging
             except Exception as e:
                 print(f"Error reading from Windows terminal: {e}")
                 time.sleep(0.1)  # Sleep on error to prevent rapid retries
-                continue  # Continue instead of breaking to make the terminal more resilient
+                continue
         
-        # Flush any remaining output
-        self._flush_output_buffer()
         self.cleanup()
-
-    def _process_windows_output(self, data):
-        """Process and buffer the terminal output"""
-        current_time = time.time()
-        
-        # Add data to buffer
-        self.output_buffer.append(data)
-        
-        # Emit if buffer is getting large or enough time has passed
-        if len(''.join(self.output_buffer)) > 1024 or (current_time - self.last_emit_time) > 0.05:
-            self._flush_output_buffer()
-
-    def _flush_output_buffer(self):
-        """Flush the output buffer to the client"""
-        if self.output_buffer:
-            try:
-                # Join all buffered data
-                output = ''.join(self.output_buffer)
-                
-                # Clean up common terminal control sequences
-                output = self._clean_terminal_output(output)
-                
-                # Only emit if we have actual content
-                if output.strip():
-                    self.socket.emit('terminal_output', output)
-                
-                # Reset buffer and update time
-                self.output_buffer = []
-                self.last_emit_time = time.time()
-            except Exception as e:
-                print(f"Error flushing output buffer: {e}")
-                self.output_buffer = []  # Clear buffer on error
 
     def _clean_terminal_output(self, output):
         """Clean up terminal output by handling control sequences"""
         if self.is_windows:
-            # Remove all ANSI escape sequences
+            # Remove ANSI escape sequences
             output = self._strip_ansi(output)
             
-            # Split into lines and clean each line
-            lines = output.split('\n')
-            cleaned_lines = []
+            # Clean up line endings
+            output = output.replace('\r\n', '\n')
+            output = output.replace('\r', '\n')
             
-            for line in lines:
-                line = line.strip('\r')  # Remove any remaining carriage returns
-                
-                # Skip unwanted lines
-                if (not line or                           # Empty lines
-                    line.count(':') >= 2 or              # Time stamps
-                    line.startswith('Mode') or           # Directory listing headers
-                    line.startswith('----') or           # Directory listing separators
-                    line.startswith('-a----') or         # File attributes
-                    line.strip().isdigit()):             # Just numbers
-                    continue
-                
-                cleaned_lines.append(line)
-            
-            # Join lines and clean up multiple newlines
-            output = '\n'.join(cleaned_lines)
-            while '\n\n' in output:
-                output = output.replace('\n\n', '\n')
-            
-            return output.strip()
+            return output
         return output
 
     def _strip_ansi(self, text):
