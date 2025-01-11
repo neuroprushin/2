@@ -28,6 +28,8 @@ class TerminalManager:
         self.is_windows = platform.system() == 'Windows'
         self.pty = None
         self.read_thread = None
+        self.output_buffer = []
+        self.last_emit_time = 0
 
     def start(self, cols, rows):
         if self.is_windows:
@@ -41,7 +43,7 @@ class TerminalManager:
             self.pty = PTY(rows, cols)
             
             # Start PowerShell in the PTY
-            self.pty.spawn('powershell.exe')
+            self.pty.spawn('powershell.exe -NoLogo')
             
             # Start reading thread
             self.running = True
@@ -60,19 +62,79 @@ class TerminalManager:
                 # Read available data
                 data = self.pty.read()
                 if data:
-                    self.socket.emit('terminal_output', data)
+                    try:
+                        # Process the data
+                        self._process_windows_output(data)
+                    except Exception as e:
+                        print(f"Error processing terminal output: {e}")
                 time.sleep(0.001)  # Tiny sleep to prevent CPU hogging
             except Exception as e:
                 print(f"Error reading from Windows terminal: {e}")
                 time.sleep(0.1)  # Sleep on error to prevent rapid retries
                 continue  # Continue instead of breaking to make the terminal more resilient
         
+        # Flush any remaining output
+        self._flush_output_buffer()
         self.cleanup()
+
+    def _process_windows_output(self, data):
+        """Process and buffer the terminal output"""
+        current_time = time.time()
+        
+        # Add data to buffer
+        self.output_buffer.append(data)
+        
+        # Emit if buffer is getting large or enough time has passed
+        if len(''.join(self.output_buffer)) > 1024 or (current_time - self.last_emit_time) > 0.05:
+            self._flush_output_buffer()
+
+    def _flush_output_buffer(self):
+        """Flush the output buffer to the client"""
+        if self.output_buffer:
+            try:
+                # Join all buffered data
+                output = ''.join(self.output_buffer)
+                
+                # Clean up common terminal control sequences
+                output = self._clean_terminal_output(output)
+                
+                # Only emit if we have actual content
+                if output.strip():
+                    self.socket.emit('terminal_output', output)
+                
+                # Reset buffer and update time
+                self.output_buffer = []
+                self.last_emit_time = time.time()
+            except Exception as e:
+                print(f"Error flushing output buffer: {e}")
+                self.output_buffer = []  # Clear buffer on error
+
+    def _clean_terminal_output(self, output):
+        """Clean up terminal output by handling control sequences"""
+        # Remove common terminal control sequences that might make output messy
+        output = output.replace('\r\n', '\n')  # Normalize line endings
+        output = output.replace('\r', '\n')    # Convert lone \r to \n
+        
+        # Remove common terminal control sequences
+        control_sequences = [
+            '\x1b[?25l',  # Hide cursor
+            '\x1b[?25h',  # Show cursor
+            '\x1b[H',     # Home position
+            '\x1b[2J',    # Clear screen
+            '\x1b[K',     # Clear line
+        ]
+        
+        for seq in control_sequences:
+            output = output.replace(seq, '')
+        
+        return output
 
     def write(self, data):
         if self.is_windows:
             if self.pty:
                 try:
+                    # Normalize line endings for Windows
+                    data = data.replace('\n', '\r\n')
                     self.pty.write(data)
                 except Exception as e:
                     print(f"Failed to write to Windows terminal: {e}")
