@@ -40,9 +40,15 @@ class TerminalManager:
     def _start_windows_terminal(self, cols, rows):
         try:
             # Create a winpty terminal with specified dimensions
+            env = os.environ.copy()
+            env['TERM'] = 'xterm-256color'
+            env['COLORTERM'] = 'truecolor'
+            
             self.winpty = PtyProcess.spawn(
                 'powershell.exe',
-                dimensions=(rows, cols)
+                dimensions=(rows, cols),
+                env=env,
+                cwd=os.getcwd()
             )
 
             # Start reading thread
@@ -56,33 +62,46 @@ class TerminalManager:
             self.cleanup()
 
     def _read_windows_output(self):
+        buffer = []
         while self.running and self.winpty and self.winpty.isalive():
             try:
                 # Read output with a timeout
-                output = self.winpty.read()
-                if output:
-                    try:
-                        if isinstance(output, bytes):
-                            decoded = output.decode('utf-8', errors='replace')
-                        else:
-                            decoded = output
-                        if decoded:
-                            self.socket.emit('terminal_output', decoded)
-                    except Exception as e:
-                        print(f"Error decoding Windows terminal output: {e}")
+                char = self.winpty.read(1)
+                if char:
+                    buffer.append(char)
+                    # If we have a newline or buffer is getting large, emit it
+                    if char == '\n' or len(buffer) >= 1024:
+                        output = ''.join(buffer)
+                        if output:
+                            self.socket.emit('terminal_output', output)
+                        buffer = []
                 else:
+                    # If there's anything in the buffer, emit it
+                    if buffer:
+                        output = ''.join(buffer)
+                        if output:
+                            self.socket.emit('terminal_output', output)
+                        buffer = []
                     time.sleep(0.01)  # Small sleep to prevent CPU hogging
             except EOFError:
                 break
             except Exception as e:
                 print(f"Error reading from Windows terminal: {e}")
                 break
+
+        # Emit any remaining buffer content
+        if buffer:
+            output = ''.join(buffer)
+            if output:
+                self.socket.emit('terminal_output', output)
         self.cleanup()
 
     def write(self, data):
         if self.is_windows:
             if self.winpty and self.winpty.isalive():
                 try:
+                    # Ensure proper line endings for Windows
+                    data = data.replace('\n', '\r\n').replace('\r\r\n', '\r\n')
                     self.winpty.write(data)
                 except Exception as e:
                     print(f"Failed to write to Windows terminal: {e}")
