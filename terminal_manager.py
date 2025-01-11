@@ -6,7 +6,7 @@ import platform
 import subprocess
 import threading
 import queue
-from threading import Thread
+from threading import Thread, Event
 import time
 import io
 
@@ -25,11 +25,13 @@ class TerminalManager:
         self.fd = None
         self.pid = None
         self.process = None
-        self.thread = None
         self.running = False
         self.is_windows = platform.system() == 'Windows'
         self.winpty = None
+        self.read_thread = None
+        self.process_thread = None
         self.output_queue = queue.Queue()
+        self.output_ready = Event()
 
     def start(self, cols, rows):
         if self.is_windows:
@@ -53,55 +55,67 @@ class TerminalManager:
 
             # Start reading thread
             self.running = True
-            self.thread = Thread(target=self._read_windows_output)
-            self.thread.daemon = True
-            self.thread.start()
+            
+            # Thread for reading from the terminal
+            self.read_thread = Thread(target=self._read_windows_output)
+            self.read_thread.daemon = True
+            self.read_thread.start()
+            
+            # Thread for processing and emitting output
+            self.process_thread = Thread(target=self._process_output)
+            self.process_thread.daemon = True
+            self.process_thread.start()
 
         except Exception as e:
             print(f"Failed to start Windows terminal: {e}")
             self.cleanup()
 
     def _read_windows_output(self):
-        buffer = []
+        """Thread that reads from the terminal and puts data into the queue"""
         while self.running and self.winpty and self.winpty.isalive():
             try:
-                # Read output with a timeout
-                char = self.winpty.read(1)
-                if char:
-                    buffer.append(char)
-                    # If we have a newline or buffer is getting large, emit it
-                    if char == '\n' or len(buffer) >= 1024:
-                        output = ''.join(buffer)
-                        if output:
-                            self.socket.emit('terminal_output', output)
-                        buffer = []
+                # Read a chunk of data
+                data = self.winpty.read()
+                if data:
+                    self.output_queue.put(data)
+                    self.output_ready.set()
                 else:
-                    # If there's anything in the buffer, emit it
-                    if buffer:
-                        output = ''.join(buffer)
-                        if output:
-                            self.socket.emit('terminal_output', output)
-                        buffer = []
-                    time.sleep(0.01)  # Small sleep to prevent CPU hogging
+                    time.sleep(0.01)
             except EOFError:
                 break
             except Exception as e:
                 print(f"Error reading from Windows terminal: {e}")
                 break
+        self.running = False
+        self.output_ready.set()  # Wake up processing thread
 
-        # Emit any remaining buffer content
-        if buffer:
-            output = ''.join(buffer)
-            if output:
-                self.socket.emit('terminal_output', output)
+    def _process_output(self):
+        """Thread that processes and emits the output"""
+        while self.running or not self.output_queue.empty():
+            try:
+                # Wait for data with timeout
+                self.output_ready.wait(timeout=0.1)
+                self.output_ready.clear()
+                
+                # Process all available data
+                while not self.output_queue.empty():
+                    data = self.output_queue.get_nowait()
+                    if data:
+                        self.socket.emit('terminal_output', data)
+                    self.output_queue.task_done()
+                    
+            except Exception as e:
+                print(f"Error processing terminal output: {e}")
+                
+            if not self.running and self.output_queue.empty():
+                break
+                
         self.cleanup()
 
     def write(self, data):
         if self.is_windows:
             if self.winpty and self.winpty.isalive():
                 try:
-                    # Ensure proper line endings for Windows
-                    data = data.replace('\n', '\r\n').replace('\r\r\n', '\r\n')
                     self.winpty.write(data)
                 except Exception as e:
                     print(f"Failed to write to Windows terminal: {e}")
@@ -129,6 +143,7 @@ class TerminalManager:
 
     def cleanup(self):
         self.running = False
+        self.output_ready.set()  # Wake up processing thread
         
         if self.is_windows:
             if self.winpty:
