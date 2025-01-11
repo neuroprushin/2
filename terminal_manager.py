@@ -8,6 +8,7 @@ import threading
 import queue
 from threading import Thread
 import time
+import io
 
 # Import platform-specific modules
 if platform.system() != 'Windows':
@@ -33,12 +34,12 @@ class TerminalManager:
 
     def _start_windows_terminal(self):
         try:
-            # Use cmd.exe with specific configurations for Windows
+            # Use powershell.exe for better terminal experience
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
             self.process = subprocess.Popen(
-                ['cmd.exe'],
+                ['powershell.exe'],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -46,6 +47,13 @@ class TerminalManager:
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                 bufsize=0
             )
+
+            # Make stdout and stderr non-blocking
+            for pipe in [self.process.stdout, self.process.stderr]:
+                if pipe:
+                    fd = pipe.fileno()
+                    flags = subprocess.msvcrt.get_osfhandle(fd)
+                    subprocess.msvcrt.setmode(fd, os.O_BINARY)
 
             # Start reading thread
             self.running = True
@@ -89,37 +97,52 @@ class TerminalManager:
                 self.cleanup()
 
     def _read_windows_output(self):
+        stdout_buffer = io.BytesIO()
+        stderr_buffer = io.BytesIO()
+        
         try:
-            while self.running and self.process:
-                # Read from stdout and stderr
-                output = self.process.stdout.read(1024)
-                if output:
+            while self.running and self.process and self.process.poll() is None:
+                # Read from stdout without blocking
+                try:
+                    stdout_data = self.process.stdout.read1(1024) if hasattr(self.process.stdout, 'read1') else self.process.stdout.read(1024)
+                    if stdout_data:
+                        stdout_buffer.write(stdout_data)
+                except (IOError, OSError):
+                    pass
+
+                # Read from stderr without blocking
+                try:
+                    stderr_data = self.process.stderr.read1(1024) if hasattr(self.process.stderr, 'read1') else self.process.stderr.read(1024)
+                    if stderr_data:
+                        stderr_buffer.write(stderr_data)
+                except (IOError, OSError):
+                    pass
+
+                # Process buffers
+                if stdout_buffer.tell() > 0:
+                    stdout_buffer.seek(0)
                     try:
-                        # Try to decode with different encodings for Windows
-                        try:
-                            decoded = output.decode('cp437', errors='replace')
-                        except:
-                            decoded = output.decode('utf-8', errors='replace')
-                        self.socket.emit('terminal_output', decoded)
+                        data = stdout_buffer.getvalue()
+                        decoded = data.decode('cp437', errors='replace')
+                        if decoded:
+                            self.socket.emit('terminal_output', decoded)
                     except Exception as e:
-                        print(f"Error decoding output: {e}")
-                
-                # Check stderr
-                error = self.process.stderr.read(1024)
-                if error:
+                        print(f"Error decoding stdout: {e}")
+                    stdout_buffer = io.BytesIO()
+
+                if stderr_buffer.tell() > 0:
+                    stderr_buffer.seek(0)
                     try:
-                        decoded = error.decode('utf-8', errors='replace')
-                        self.socket.emit('terminal_output', decoded)
+                        data = stderr_buffer.getvalue()
+                        decoded = data.decode('utf-8', errors='replace')
+                        if decoded:
+                            self.socket.emit('terminal_output', decoded)
                     except Exception as e:
                         print(f"Error decoding stderr: {e}")
-                
-                # Check if process has ended
-                if not output and not error and self.process.poll() is not None:
-                    break
-                
-                # Small sleep to prevent CPU hogging
-                time.sleep(0.01)
-                
+                    stderr_buffer = io.BytesIO()
+
+                time.sleep(0.01)  # Prevent CPU hogging
+
         except Exception as e:
             print(f"Error reading from Windows terminal: {e}")
         finally:
