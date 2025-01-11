@@ -1,4 +1,5 @@
 """Main application module"""
+
 # pylama:ignore=E501,C901
 import eventlet
 eventlet.monkey_patch()
@@ -16,8 +17,8 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 from flask_socketio import SocketIO
 from openai import OpenAI
 
-from workspace_manager import WorkspaceManager
 from terminal_manager import TerminalManager
+from workspace_manager import WorkspaceManager
 
 
 # Model configurations
@@ -71,7 +72,7 @@ AVAILABLE_MODELS = {
         "client_class": Anthropic,
         "models": {
             "code": "claude-3-5-sonnet-20241022",
-            "chat": "claude-3-5-sonnet-20241022"
+            "chat": "claude-3-5-sonnet-20241022",
         },
         "max_tokens": 100000,
     },
@@ -225,15 +226,18 @@ workspace_manager = WorkspaceManager(WORKSPACE_ROOT)
 # Store terminal managers for each client
 terminal_managers = {}
 
-@app.route('/')
-def index():
-    return render_template('base.html')
 
-@socketio.on('connect')
+@app.route("/")
+def index():
+    return render_template("base.html")
+
+
+@socketio.on("connect")
 def handle_connect():
     print(f"Client connected: {request.sid}")
 
-@socketio.on('disconnect')
+
+@socketio.on("disconnect")
 def handle_disconnect():
     # Cleanup terminal if it exists
     if request.sid in terminal_managers:
@@ -241,21 +245,26 @@ def handle_disconnect():
         del terminal_managers[request.sid]
     print(f"Client disconnected: {request.sid}")
 
-@socketio.on('terminal_init')
+
+@socketio.on("terminal_init")
 def handle_terminal_init(data):
     # Create new terminal manager for this client
     terminal_managers[request.sid] = TerminalManager(socketio)
-    terminal_managers[request.sid].start(data['cols'], data['rows'])
+    terminal_managers[request.sid].start(data["cols"], data["rows"])
 
-@socketio.on('terminal_input')
+
+@socketio.on("terminal_input")
 def handle_terminal_input(data):
     if request.sid in terminal_managers:
-        terminal_managers[request.sid].write(data['data'])
+        terminal_managers[request.sid].write(data["data"])
 
-@socketio.on('terminal_resize')
+
+@socketio.on("terminal_resize")
 def handle_terminal_resize(data):
     if request.sid in terminal_managers:
-        terminal_managers[request.sid].resize_terminal(data['cols'], data['rows'])
+        terminal_managers[request.sid].resize_terminal(data["cols"],
+                                                       data["rows"])
+
 
 def create_workspace():
     """Create a new workspace directory"""
@@ -1361,17 +1370,45 @@ def run_linter(file_path):
         # Skip binary files and common non-text formats
         binary_extensions = {
             # Binary files
-            ".pyc", ".pyo", ".so", ".dll", ".exe", ".bin",
+            ".pyc",
+            ".pyo",
+            ".so",
+            ".dll",
+            ".exe",
+            ".bin",
             # Images
-            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".ico", ".webp",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".bmp",
+            ".ico",
+            ".webp",
             # Documents
-            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+            ".pdf",
+            ".doc",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".ppt",
+            ".pptx",
             # Archives
-            ".zip", ".tar", ".gz", ".rar", ".7z",
+            ".zip",
+            ".tar",
+            ".gz",
+            ".rar",
+            ".7z",
             # Media
-            ".mp3", ".mp4", ".avi", ".mov", ".wav",
+            ".mp3",
+            ".mp4",
+            ".avi",
+            ".mov",
+            ".wav",
             # Other binaries
-            ".db", ".sqlite", ".class", ".o"
+            ".db",
+            ".sqlite",
+            ".class",
+            ".o",
         }
         if file_ext in binary_extensions:
             return True
@@ -1382,7 +1419,7 @@ def run_linter(file_path):
                 ["pylama", file_path],
                 capture_output=True,
                 text=True,
-                timeout=30  # Add timeout to prevent hanging
+                timeout=30,  # Add timeout to prevent hanging
             )
             # Print linting output for debugging
             if result.stdout or result.stderr:
@@ -1771,43 +1808,46 @@ def get_code_suggestion(prompt,
             try:
                 # Extract the JSON part
                 json_text = cleaned_text[json_start:json_end + 1]
-                
+
                 # Preprocess the JSON text to handle triple quotes
                 def preprocess_json(text):
-                    # Split the text into parts by finding all occurrences of triple quotes
+                    # Split the text into parts by finding all occurrences of
+                    # triple quotes
                     parts = []
                     last_pos = 0
                     pos = text.find('"""')
-                    
+
                     while pos != -1:
                         # Add the text before the triple quotes
                         parts.append(text[last_pos:pos])
-                        
+
                         # Find the closing triple quotes
                         end_pos = text.find('"""', pos + 3)
                         if end_pos == -1:
-                            # If no closing quotes found, treat the rest as normal text
+                            # If no closing quotes found, treat the rest as
+                            # normal text
                             parts.append(text[pos:])
                             break
-                        
+
                         # Get the content between triple quotes and escape it
                         content = text[pos + 3:end_pos]
-                        escaped_content = content.replace('"', '\\"').replace('\n', '\\n')
+                        escaped_content = content.replace('"', '\\"').replace(
+                            "\n", "\\n")
                         parts.append(f'"{escaped_content}"')
-                        
+
                         last_pos = end_pos + 3
                         pos = text.find('"""', last_pos)
-                    
+
                     # Add any remaining text
                     if last_pos < len(text):
                         parts.append(text[last_pos:])
-                    
+
                     # Join parts and normalize quotes
-                    result = ''.join(parts)
+                    result = "".join(parts)
                     # Replace curly quotes with straight quotes
                     result = result.replace('"', '"').replace('"', '"')
                     return result
-                
+
                 # Preprocess the JSON text and parse it
                 processed_json = preprocess_json(json_text)
                 result = json.loads(processed_json)
@@ -1939,9 +1979,9 @@ def list_available_folders():
                                     sum(
                                         os.path.getsize(
                                             os.path.join(dirpath, filename))
-                                            for dirpath, dirnames, filenames in
-                                            os.walk(full_path)
-                                            for filename in filenames),
+                                        for dirpath, dirnames, filenames in
+                                        os.walk(full_path)
+                                        for filename in filenames),
                                     "files":
                                     sum(
                                         len(files)
@@ -1982,7 +2022,6 @@ def list_available_folders():
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
-
 
 
 @app.route("/workspace/rename_file", methods=["POST"])
@@ -2102,7 +2141,4 @@ def get_operation_diff(operation, workspace_dir):
 
 if __name__ == "__main__":
     # Run with eventlet server
-    socketio.run(app,
-                 debug=False,
-                 host="0.0.0.0",
-                 port=5000)
+    socketio.run(app, debug=False, host="0.0.0.0", port=5000)
