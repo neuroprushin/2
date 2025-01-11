@@ -43,13 +43,15 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Set up environment variables
-            env = os.environ.copy()
-            env['TERM'] = 'xterm'  # Use basic xterm for better compatibility
-            env['PYTHONIOENCODING'] = 'utf-8'
-            
-            # Start PowerShell with environment
-            self.pty.spawn('powershell.exe -NoLogo', env=env)
+            # Start PowerShell with terminal type set in the command
+            startup_command = (
+                'powershell.exe -NoLogo '
+                '$env:TERM="xterm"; '
+                '$OutputEncoding = [System.Text.Encoding]::UTF8; '
+                '[System.Console]::OutputEncoding = [System.Text.Encoding]::UTF8; '
+                '[System.Console]::InputEncoding = [System.Text.Encoding]::UTF8'
+            )
+            self.pty.spawn(startup_command)
             
             # Start reading thread
             self.running = True
