@@ -196,6 +196,8 @@ IMPORTANT:
 Respond with a single, valid JSON object."""
 
 # Initialize clients for each model
+load_dotenv()
+
 model_clients = {}
 for model_id, config in AVAILABLE_MODELS.items():
     api_key = os.getenv(config["api_key_env"])
@@ -214,7 +216,6 @@ for model_id, config in AVAILABLE_MODELS.items():
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # For session management
 socketio = SocketIO(app, cors_allowed_origins="*")
-load_dotenv()
 
 # Set up workspace directory
 WORKSPACE_ROOT = os.path.join(os.getcwd(), "workspaces")
