@@ -16,7 +16,7 @@ if platform.system() != 'Windows':
     import fcntl
     import pty
 else:
-    from winpty import PTY
+    from winpty import PtyProcess
     import msvcrt
 
 class TerminalManager:
@@ -40,10 +40,9 @@ class TerminalManager:
     def _start_windows_terminal(self, cols, rows):
         try:
             # Create a winpty terminal with specified dimensions
-            self.winpty = PTY(
-                cols=cols,
-                rows=rows,
-                backend='powershell.exe'
+            self.winpty = PtyProcess.spawn(
+                'powershell.exe',
+                dimensions=(rows, cols)
             )
 
             # Start reading thread
@@ -57,20 +56,24 @@ class TerminalManager:
             self.cleanup()
 
     def _read_windows_output(self):
-        while self.running and self.winpty:
+        while self.running and self.winpty and self.winpty.isalive():
             try:
                 # Read output with a timeout
                 output = self.winpty.read()
                 if output:
                     try:
-                        # Ensure proper decoding of Windows output
-                        decoded = output.decode('utf-8', errors='replace')
+                        if isinstance(output, bytes):
+                            decoded = output.decode('utf-8', errors='replace')
+                        else:
+                            decoded = output
                         if decoded:
                             self.socket.emit('terminal_output', decoded)
                     except Exception as e:
                         print(f"Error decoding Windows terminal output: {e}")
                 else:
                     time.sleep(0.01)  # Small sleep to prevent CPU hogging
+            except EOFError:
+                break
             except Exception as e:
                 print(f"Error reading from Windows terminal: {e}")
                 break
@@ -78,10 +81,8 @@ class TerminalManager:
 
     def write(self, data):
         if self.is_windows:
-            if self.winpty:
+            if self.winpty and self.winpty.isalive():
                 try:
-                    # Ensure proper line endings for Windows
-                    data = data.replace('\n', '\r\n')
                     self.winpty.write(data)
                 except Exception as e:
                     print(f"Failed to write to Windows terminal: {e}")
@@ -94,9 +95,9 @@ class TerminalManager:
 
     def resize_terminal(self, cols, rows):
         if self.is_windows:
-            if self.winpty:
+            if self.winpty and self.winpty.isalive():
                 try:
-                    self.winpty.resize(cols, rows)
+                    self.winpty.setwinsize(rows, cols)
                 except Exception as e:
                     print(f"Failed to resize Windows terminal: {e}")
         else:
@@ -113,7 +114,7 @@ class TerminalManager:
         if self.is_windows:
             if self.winpty:
                 try:
-                    self.winpty.close()
+                    self.winpty.terminate(force=True)
                 except:
                     pass
                 self.winpty = None
