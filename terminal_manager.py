@@ -9,6 +9,7 @@ import queue
 from threading import Thread
 import time
 import io
+import re
 
 # Import platform-specific modules
 if platform.system() != 'Windows':
@@ -42,8 +43,14 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Start PowerShell in the PTY
-            self.pty.spawn('powershell.exe -NoLogo')
+            # Start PowerShell with specific configuration to minimize noise
+            startup_command = (
+                'powershell.exe -NoLogo -NoProfile '
+                '$Host.UI.RawUI.WindowTitle = "Terminal"; '
+                'Remove-Item alias:ls; '
+                'function prompt { "PS " + (Get-Location) + "> " }'
+            )
+            self.pty.spawn(startup_command)
             
             # Start reading thread
             self.running = True
@@ -111,50 +118,40 @@ class TerminalManager:
 
     def _clean_terminal_output(self, output):
         """Clean up terminal output by handling control sequences"""
-        # Handle PowerShell-specific output patterns
         if self.is_windows:
-            # Remove the timestamp pattern that appears in the screenshot
-            output = output.replace('\x1b[?25h', '')  # Remove cursor show
-            output = output.replace('\x1b[?25l', '')  # Remove cursor hide
+            # Remove all ANSI escape sequences
+            output = self._strip_ansi(output)
             
-            # Remove PowerShell's timestamp lines
+            # Split into lines and clean each line
             lines = output.split('\n')
             cleaned_lines = []
+            
             for line in lines:
-                # Skip the timestamp lines that match the pattern shown in the screenshot
-                if not (line.startswith('-a----') or 
-                       line.strip().endswith('PM') or 
-                       line.strip().endswith('AM') or
-                       line.strip().isdigit() or
-                       line.strip() == ''):
-                    cleaned_lines.append(line)
+                line = line.strip('\r')  # Remove any remaining carriage returns
+                
+                # Skip unwanted lines
+                if (not line or                           # Empty lines
+                    line.count(':') >= 2 or              # Time stamps
+                    line.startswith('Mode') or           # Directory listing headers
+                    line.startswith('----') or           # Directory listing separators
+                    line.startswith('-a----') or         # File attributes
+                    line.strip().isdigit()):             # Just numbers
+                    continue
+                
+                cleaned_lines.append(line)
             
+            # Join lines and clean up multiple newlines
             output = '\n'.join(cleaned_lines)
+            while '\n\n' in output:
+                output = output.replace('\n\n', '\n')
             
-            # Clean up the prompt to show only PS path>
-            output = output.replace('\x1b[0m', '')  # Remove color reset
-            output = output.replace('\x1b[91m', '')  # Remove red color
-            output = output.replace('\x1b[93m', '')  # Remove yellow color
-            output = output.replace('\x1b[92m', '')  # Remove green color
-            output = output.replace('\x1b[94m', '')  # Remove blue color
-            output = output.replace('\x1b[96m', '')  # Remove cyan color
-            output = output.replace('\x1b[97m', '')  # Remove white color
-            
-            # Remove other common ANSI sequences
-            output = output.replace('\x1b[G', '')    # Cursor horizontal absolute
-            output = output.replace('\x1b[K', '')    # Clear line
-            output = output.replace('\x1b[J', '')    # Clear screen
-            output = output.replace('\x1b[H', '')    # Cursor home
-            
-            # Normalize line endings
-            output = output.replace('\r\n', '\n')
-            output = output.replace('\r', '\n')
-            
-            # Remove multiple consecutive newlines
-            while '\n\n\n' in output:
-                output = output.replace('\n\n\n', '\n\n')
-        
-        return output.strip()
+            return output.strip()
+        return output
+
+    def _strip_ansi(self, text):
+        """Remove ANSI escape sequences"""
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        return ansi_escape.sub('', text)
 
     def write(self, data):
         if self.is_windows:
