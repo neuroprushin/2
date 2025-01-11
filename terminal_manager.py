@@ -43,10 +43,14 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Start cmd.exe with UTF-8 and proper window size
+            # Get workspace directory
+            workspace_dir = os.getcwd()
+            
+            # Start cmd.exe with UTF-8, proper window size, and change to workspace directory
             # /k keeps the window open after commands
             # mode CON: sets the console window and buffer size
-            startup_command = f'cmd.exe /k mode CON: COLS={cols} LINES={rows}'
+            # cd /d changes drive and directory
+            startup_command = f'cmd.exe /k "cd /d {workspace_dir} && mode CON: COLS={cols} LINES={rows}"'
             self.pty.spawn(startup_command)
             
             # Start reading thread
@@ -168,15 +172,22 @@ class TerminalManager:
         # Choose shell based on environment
         shell = os.environ.get('SHELL', '/bin/bash')
         
+        # Get workspace directory
+        workspace_dir = os.getcwd()
+        
         # Create PTY and fork process
         self.pid, self.fd = pty.fork()
         
         if self.pid == 0:  # Child process
-            # Set up environment
-            os.environ['TERM'] = 'xterm-256color'
-            os.environ['COLORTERM'] = 'truecolor'
-            
             try:
+                # Set up environment
+                os.environ['TERM'] = 'xterm-256color'
+                os.environ['COLORTERM'] = 'truecolor'
+                
+                # Change to workspace directory
+                os.chdir(workspace_dir)
+                
+                # Execute shell
                 os.execvp(shell, [shell])
             except Exception as e:
                 print(f"Failed to execute shell: {e}")
