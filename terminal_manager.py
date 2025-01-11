@@ -43,8 +43,13 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Start PowerShell with minimal configuration
-            self.pty.spawn('powershell.exe -NoLogo')
+            # Set up environment variables
+            env = os.environ.copy()
+            env['TERM'] = 'xterm'  # Use basic xterm for better compatibility
+            env['PYTHONIOENCODING'] = 'utf-8'
+            
+            # Start PowerShell with environment
+            self.pty.spawn('powershell.exe -NoLogo', env=env)
             
             # Start reading thread
             self.running = True
@@ -78,7 +83,7 @@ class TerminalManager:
     def _clean_terminal_output(self, output):
         """Clean up terminal output by handling control sequences"""
         if self.is_windows:
-            # Remove ANSI escape sequences
+            # Remove ANSI escape sequences that might be misinterpreted
             output = self._strip_ansi(output)
             
             # Clean up line endings
