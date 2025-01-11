@@ -1,4 +1,5 @@
 """Workspace manager module for handling file operations and codebase management."""
+
 # pylama:ignore=E501,C901,E125,E251
 import hashlib
 import logging
@@ -243,7 +244,8 @@ class WorkspaceManager:
         # Setup console handler
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
-        console_format = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        console_format = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s")
         console_handler.setFormatter(console_format)
         self.logger.addHandler(console_handler)
 
@@ -255,16 +257,19 @@ class WorkspaceManager:
                     os.remove(log_file)
                 except Exception as e:
                     print(f"Failed to delete old log file: {e}")
-            
+
             file_handler = logging.FileHandler(log_file)
             file_handler.setLevel(logging.DEBUG)
-            file_format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s")
+            file_format = logging.Formatter(
+                "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s"
+            )
             file_handler.setFormatter(file_format)
             self.logger.addHandler(file_handler)
         except Exception as e:
             print(f"Failed to setup file logging: {e}")
 
-        self.logger.info(f"Initializing WorkspaceManager with root: {workspace_root}")
+        self.logger.info(
+            f"Initializing WorkspaceManager with root: {workspace_root}")
 
         # Initialize BM25 search
         self.search_index = BM25Search()
@@ -1203,11 +1208,13 @@ class WorkspaceManager:
                             # Combine stdout and stderr for complete output
                             operation["lint_output"] = result.stdout
                             if result.stderr:
-                                operation["lint_output"] += "\n" + result.stderr
+                                operation["lint_output"] += "\n" + \
+                                    result.stderr
                             operation["lint_passed"] = result.returncode == 0
                         except Exception as e:
                             print(f"Linting error: {str(e)}")
-                            operation["lint_output"] = f"Linting failed: {str(e)}"
+                            operation[
+                                "lint_output"] = f"Linting failed: {str(e)}"
                             operation["lint_passed"] = False
                         finally:
                             try:
@@ -1251,11 +1258,13 @@ class WorkspaceManager:
                             # Combine stdout and stderr for complete output
                             operation["lint_output"] = result.stdout
                             if result.stderr:
-                                operation["lint_output"] += "\n" + result.stderr
+                                operation["lint_output"] += "\n" + \
+                                    result.stderr
                             operation["lint_passed"] = result.returncode == 0
                         except Exception as e:
                             print(f"Linting error: {str(e)}")
-                            operation["lint_output"] = f"Linting failed: {str(e)}"
+                            operation[
+                                "lint_output"] = f"Linting failed: {str(e)}"
                             operation["lint_passed"] = False
                         finally:
                             try:

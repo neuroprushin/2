@@ -1,4 +1,5 @@
 """Code analyzer module for analyzing and processing code files."""
+
 # pylama:ignore=E501,E251
 import os
 import re
