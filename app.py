@@ -2101,21 +2101,8 @@ def get_operation_diff(operation, workspace_dir):
 
 
 if __name__ == "__main__":
-    # Watch static and template directories for changes
-    extra_files = []
-    for root, dirs, files in os.walk("static"):
-        for file in files:
-            path = os.path.join(root, file)
-            extra_files.append(path)
-
-    for root, dirs, files in os.walk("templates"):
-        for file in files:
-            path = os.path.join(root, file)
-            extra_files.append(path)
-
-    # Run with eventlet server and reloader enabled
+    # Run with eventlet server
     socketio.run(app,
-                 debug=True,
-                 extra_files=extra_files,
+                 debug=False,
                  host="0.0.0.0",
                  port=5000)

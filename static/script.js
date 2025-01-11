@@ -52,7 +52,9 @@ function initializeTerminal() {
         },
         allowTransparency: true,
         fastScrollModifier: 'alt',
-        scrollSensitivity: 2
+        scrollSensitivity: 2,
+        rightClickSelectsWord: true,
+        allowProposedApi: true
     });
 
     // Load addons
@@ -80,6 +82,47 @@ function initializeTerminal() {
         fitAddon.fit();
         const dimensions = { cols: term.cols, rows: term.rows };
         socket.emit('terminal_resize', dimensions);
+    });
+
+    // Handle copy/paste
+    let pasteInProgress = false;
+    
+    // Add paste event listener to terminal element
+    term.element.addEventListener('paste', (event) => {
+        event.preventDefault();
+        if (!pasteInProgress) {
+            pasteInProgress = true;
+            const text = event.clipboardData.getData('text');
+            socket.emit('terminal_input', { data: text });
+            setTimeout(() => {
+                pasteInProgress = false;
+            }, 100);
+        }
+    });
+
+    term.attachCustomKeyEventHandler((event) => {
+        if (event.type === 'keydown') {
+            // Copy: Ctrl+C when text is selected
+            if (event.ctrlKey && !event.shiftKey && event.key === 'c' && term.hasSelection()) {
+                const selectedText = term.getSelection();
+                navigator.clipboard.writeText(selectedText);
+                return false;
+            }
+            
+            // Linux-style Copy: Ctrl+Shift+C
+            if (event.ctrlKey && event.shiftKey && event.key === 'C') {
+                const selectedText = term.getSelection();
+                navigator.clipboard.writeText(selectedText);
+                return false;
+            }
+            
+            // Let the browser handle paste events natively
+            if ((event.ctrlKey && !event.shiftKey && event.key === 'v') ||
+                (event.ctrlKey && event.shiftKey && event.key === 'V')) {
+                return false;
+            }
+        }
+        return true;
     });
 
     // Initialize terminal connection
