@@ -43,8 +43,14 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Start cmd.exe with minimal configuration
-            self.pty.spawn('cmd.exe')
+            # Start PowerShell with proper window size
+            startup_command = (
+                'powershell.exe -NoLogo '
+                '-Command "'
+                '$Host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size($Host.UI.RawUI.WindowSize.Width, $Host.UI.RawUI.WindowSize.Height); '
+                '$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size($Host.UI.RawUI.BufferSize.Width, $Host.UI.RawUI.BufferSize.Height)"'
+            )
+            self.pty.spawn(startup_command)
             
             # Start reading thread
             self.running = True
@@ -122,7 +128,24 @@ class TerminalManager:
         if self.is_windows:
             if self.pty:
                 try:
-                    self.pty.resize(rows, cols)
+                    # For Windows, we need to recreate the PTY with new dimensions
+                    old_pty = self.pty
+                    self.pty = PTY(rows, cols)
+                    
+                    # Transfer the process to the new PTY if possible
+                    if hasattr(old_pty, 'conin_pipe'):
+                        self.pty.conin_pipe = old_pty.conin_pipe
+                        self.pty.conout_pipe = old_pty.conout_pipe
+                    
+                    # Update PowerShell's window size
+                    resize_command = (
+                        '$Host.UI.RawUI.WindowSize = '
+                        f'New-Object System.Management.Automation.Host.Size({cols}, {rows}); '
+                        '$Host.UI.RawUI.BufferSize = '
+                        f'New-Object System.Management.Automation.Host.Size({cols}, {rows})'
+                    )
+                    self.pty.write(resize_command + '\r\n')
+                    
                 except Exception as e:
                     print(f"Failed to resize Windows terminal: {e}")
         else:
