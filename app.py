@@ -17,6 +17,7 @@ from flask_socketio import SocketIO
 from openai import OpenAI
 
 from workspace_manager import WorkspaceManager
+from terminal_manager import TerminalManager
 
 
 # Model configurations
@@ -221,6 +222,40 @@ os.makedirs(WORKSPACE_ROOT, exist_ok=True)
 # Initialize workspace manager
 workspace_manager = WorkspaceManager(WORKSPACE_ROOT)
 
+# Store terminal managers for each client
+terminal_managers = {}
+
+@app.route('/')
+def index():
+    return render_template('base.html')
+
+@socketio.on('connect')
+def handle_connect():
+    print(f"Client connected: {request.sid}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    # Cleanup terminal if it exists
+    if request.sid in terminal_managers:
+        terminal_managers[request.sid].cleanup()
+        del terminal_managers[request.sid]
+    print(f"Client disconnected: {request.sid}")
+
+@socketio.on('terminal_init')
+def handle_terminal_init(data):
+    # Create new terminal manager for this client
+    terminal_managers[request.sid] = TerminalManager(socketio)
+    terminal_managers[request.sid].start(data['cols'], data['rows'])
+
+@socketio.on('terminal_input')
+def handle_terminal_input(data):
+    if request.sid in terminal_managers:
+        terminal_managers[request.sid].write(data['data'])
+
+@socketio.on('terminal_resize')
+def handle_terminal_resize(data):
+    if request.sid in terminal_managers:
+        terminal_managers[request.sid].resize_terminal(data['cols'], data['rows'])
 
 def create_workspace():
     """Create a new workspace directory"""
@@ -494,11 +529,6 @@ def get_existing_files(workspace_dir):
                     print(f"Warning: Could not read file {file_path}: {e}")
                     continue
     return files_content
-
-
-@app.route("/")
-def index():
-    return render_template("base.html")
 
 
 @app.route("/workspace/create", methods=["POST"])

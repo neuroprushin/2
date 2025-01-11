@@ -4,6 +4,9 @@ let currentModel = 'deepseek';
 let pendingChanges = null;
 let socket = null;
 let expandedDirs = new Map(); // Track expanded directories and their pagination state
+let term = null;
+let fitAddon = null;
+let isTerminalExpanded = false;
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', () => {
@@ -11,7 +14,97 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeModelSelection();
     loadWorkspaceHistory();
     initializeKeyboardShortcuts();
+    initializeTerminal();
 });
+
+// Terminal Management
+function initializeTerminal() {
+    // Create terminal instance
+    term = new Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        fontFamily: '"Cascadia Code", "Source Code Pro", "Fira Code", Menlo, monospace',
+        lineHeight: 1.3,
+        letterSpacing: 0.5,
+        scrollback: 5000,
+        theme: {
+            background: '#1e1e1e',
+            foreground: '#d4d4d4',
+            cursor: '#a0a0a0',
+            cursorAccent: '#1e1e1e',
+            selection: 'rgba(255, 255, 255, 0.15)',
+            black: '#1e1e1e',
+            red: '#f44747',
+            green: '#6a9955',
+            yellow: '#d7ba7d',
+            blue: '#569cd6',
+            magenta: '#c586c0',
+            cyan: '#4dc9b0',
+            white: '#d4d4d4',
+            brightBlack: '#808080',
+            brightRed: '#f44747',
+            brightGreen: '#6a9955',
+            brightYellow: '#d7ba7d',
+            brightBlue: '#569cd6',
+            brightMagenta: '#c586c0',
+            brightCyan: '#4dc9b0',
+            brightWhite: '#ffffff'
+        },
+        allowTransparency: true,
+        fastScrollModifier: 'alt',
+        scrollSensitivity: 2
+    });
+
+    // Load addons
+    fitAddon = new FitAddon.FitAddon();
+    const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(webLinksAddon);
+
+    // Open terminal in container
+    term.open(document.getElementById('terminal'));
+    
+    // Set terminal padding
+    term.element.style.padding = '8px';
+    
+    // Fit terminal to container
+    fitAddon.fit();
+
+    // Handle terminal input
+    term.onData(data => {
+        socket.emit('terminal_input', { data });
+    });
+
+    // Handle terminal resize
+    window.addEventListener('resize', () => {
+        fitAddon.fit();
+        const dimensions = { cols: term.cols, rows: term.rows };
+        socket.emit('terminal_resize', dimensions);
+    });
+
+    // Initialize terminal connection
+    socket.emit('terminal_init', { cols: term.cols, rows: term.rows });
+}
+
+function clearTerminal() {
+    term.clear();
+}
+
+function toggleTerminal() {
+    const terminalContainer = document.getElementById('terminalContainer');
+    
+    isTerminalExpanded = !isTerminalExpanded;
+    
+    if (isTerminalExpanded) {
+        terminalContainer.style.height = '400px';
+    } else {
+        terminalContainer.style.height = '200px';
+    }
+    
+    fitAddon.fit();
+    const dimensions = { cols: term.cols, rows: term.rows };
+    socket.emit('terminal_resize', dimensions);
+}
 
 // WebSocket Setup
 function initializeWebSocket() {
@@ -36,6 +129,11 @@ function initializeWebSocket() {
     socket.on('disconnect', () => {
         console.log('Disconnected from server');
         updateConnectionStatus(false);
+    });
+    
+    // Terminal events
+    socket.on('terminal_output', (data) => {
+        term.write(data);
     });
 }
 
