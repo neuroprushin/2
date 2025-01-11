@@ -43,13 +43,15 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Start PowerShell with terminal type set in the command
+            # Start PowerShell with proper configuration for escape sequences
             startup_command = (
-                'powershell.exe -NoLogo '
-                '$env:TERM="xterm"; '
-                '$OutputEncoding = [System.Text.Encoding]::UTF8; '
-                '[System.Console]::OutputEncoding = [System.Text.Encoding]::UTF8; '
-                '[System.Console]::InputEncoding = [System.Text.Encoding]::UTF8'
+                'powershell.exe -NoLogo -NoExit '
+                '-Command "$PSStyle.OutputRendering=\'Ansi\'; '
+                '$env:TERM=\'xterm\'; '
+                '$OutputEncoding=[System.Text.Encoding]::UTF8; '
+                '[System.Console]::OutputEncoding=[System.Text.Encoding]::UTF8; '
+                '[System.Console]::InputEncoding=[System.Text.Encoding]::UTF8; '
+                'function prompt { \"`e[32m$($executionContext.SessionState.Path.CurrentLocation)\`e[0m> \" }"'
             )
             self.pty.spawn(startup_command)
             
@@ -76,8 +78,11 @@ class TerminalManager:
                         self.socket.emit('terminal_output', cleaned)
                 time.sleep(0.001)  # Tiny sleep to prevent CPU hogging
             except Exception as e:
-                print(f"Error reading from Windows terminal: {e}")
+                if 'EOF' not in str(e):  # Don't print EOF errors
+                    print(f"Error reading from Windows terminal: {e}")
                 time.sleep(0.1)  # Sleep on error to prevent rapid retries
+                if 'EOF' in str(e):
+                    break  # Exit on EOF
                 continue
         
         self.cleanup()
@@ -85,13 +90,9 @@ class TerminalManager:
     def _clean_terminal_output(self, output):
         """Clean up terminal output by handling control sequences"""
         if self.is_windows:
-            # Remove ANSI escape sequences that might be misinterpreted
-            output = self._strip_ansi(output)
-            
-            # Clean up line endings
+            # Clean up line endings but preserve escape sequences
             output = output.replace('\r\n', '\n')
             output = output.replace('\r', '\n')
-            
             return output
         return output
 
