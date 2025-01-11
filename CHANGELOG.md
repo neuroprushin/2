@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.14] - 2024-01-15
+
+### Added
+- Integrated Terminal functionality:
+  - Cross-platform terminal support for Windows and Linux
+  - xterm.js integration for modern terminal experience
+  - Automatic workspace directory initialization
+  - Real-time output streaming and command execution
+  - Command history support
+  - Native shell integration (cmd.exe on Windows, bash on Linux)
+  - Proper directory tracking and workspace synchronization
+
+### Enhanced
+- Terminal user experience:
+  - Improved terminal output formatting
+  - Better error handling for terminal commands
+  - Workspace-aware terminal sessions
+  - Cross-platform path handling
+
+### Fixed
+- Terminal directory synchronization issues
+- Windows-specific terminal encoding problems
+- Terminal output streaming performance
+- Workspace path handling in terminal sessions
+
 ## [0.0.13] - 2024-01-14
 
 ### Removed
