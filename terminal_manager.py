@@ -43,8 +43,8 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Start cmd.exe with codepage 65001 (UTF-8)
-            self.pty.spawn('cmd.exe /k chcp 65001>nul')
+            # Start cmd.exe with UTF-8 and virtual terminal sequences enabled
+            self.pty.spawn('cmd.exe /u /k chcp 65001>nul & prompt $P$G')
             
             # Start reading thread
             self.running = True
@@ -58,32 +58,30 @@ class TerminalManager:
 
     def _read_windows_output(self):
         """Thread that reads from the terminal and emits output"""
-        buffer = []
+        output_buffer = io.StringIO()
+        
         while self.running and self.pty:
             try:
                 # Read available data
                 data = self.pty.read()
                 if data:
-                    # Split on newlines but keep the newline characters
-                    lines = data.splitlines(keepends=True)
+                    # Add to buffer
+                    output_buffer.write(data)
                     
-                    for line in lines:
-                        # If line ends with newline, emit buffer + line
-                        if line.endswith('\n') or line.endswith('\r'):
-                            if buffer:
-                                full_line = ''.join(buffer) + line
-                                buffer = []
-                            else:
-                                full_line = line
+                    # Get current buffer content
+                    content = output_buffer.getvalue()
+                    
+                    # If we have a complete line or buffer is getting large
+                    if '\n' in content or len(content) > 1024:
+                        # Get the content and clear buffer
+                        output = content
+                        output_buffer = io.StringIO()
+                        
+                        # Clean and emit
+                        cleaned = self._clean_terminal_output(output)
+                        if cleaned:
+                            self.socket.emit('terminal_output', cleaned)
                             
-                            # Clean up the line and emit if not empty
-                            cleaned = self._clean_terminal_output(full_line)
-                            if cleaned.strip():
-                                self.socket.emit('terminal_output', cleaned)
-                        else:
-                            # Add to buffer if no newline
-                            buffer.append(line)
-                    
                 time.sleep(0.001)  # Tiny sleep to prevent CPU hogging
             except Exception as e:
                 if 'EOF' not in str(e):  # Don't print EOF errors
@@ -93,30 +91,35 @@ class TerminalManager:
                     break  # Exit on EOF
                 continue
         
-        # Emit any remaining buffered content
-        if buffer:
-            cleaned = self._clean_terminal_output(''.join(buffer))
-            if cleaned.strip():
+        # Emit any remaining content
+        final_content = output_buffer.getvalue()
+        if final_content:
+            cleaned = self._clean_terminal_output(final_content)
+            if cleaned:
                 self.socket.emit('terminal_output', cleaned)
         
+        output_buffer.close()
         self.cleanup()
 
     def _clean_terminal_output(self, output):
         """Clean up terminal output by handling control sequences"""
         if self.is_windows:
+            # Remove the chcp command output
+            if 'Active code page:' in output:
+                output = output.split('\n', 1)[1] if '\n' in output else ''
+            
             # Normalize line endings
             output = output.replace('\r\n', '\n')
             output = output.replace('\r', '\n')
             
-            # Remove null bytes that Windows might add
+            # Remove null bytes
             output = output.replace('\x00', '')
             
-            # Remove common Windows terminal control sequences
-            output = re.sub(r'\x1b\[\d*[ABCDEFGJKST]', '', output)
-            output = re.sub(r'\x1b\[\d*;\d*[Hf]', '', output)
-            output = re.sub(r'\x1b\[=\d*[hl]', '', output)
+            # Remove duplicate empty lines
+            while '\n\n\n' in output:
+                output = output.replace('\n\n\n', '\n\n')
             
-            return output
+            return output.strip()
         return output
 
     def _strip_ansi(self, text):
