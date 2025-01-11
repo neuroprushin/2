@@ -6,7 +6,7 @@ import platform
 import subprocess
 import threading
 import queue
-from threading import Thread, Event
+from threading import Thread
 import time
 import io
 
@@ -15,9 +15,6 @@ if platform.system() != 'Windows':
     import termios
     import fcntl
     import pty
-else:
-    from winpty import PtyProcess
-    import msvcrt
 
 class TerminalManager:
     def __init__(self, socket):
@@ -27,9 +24,8 @@ class TerminalManager:
         self.process = None
         self.running = False
         self.is_windows = platform.system() == 'Windows'
-        self.winpty = None
-        self.read_thread = None
-        self.output_queue = queue.Queue()
+        self.stdout_thread = None
+        self.stderr_thread = None
 
     def start(self, cols, rows):
         if self.is_windows:
@@ -39,60 +35,62 @@ class TerminalManager:
 
     def _start_windows_terminal(self, cols, rows):
         try:
-            # Create a winpty terminal with specified dimensions
-            env = os.environ.copy()
-            env['TERM'] = 'xterm-256color'
-            env['COLORTERM'] = 'truecolor'
+            # Create a subprocess with pipes
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             
-            self.winpty = PtyProcess.spawn(
-                'powershell.exe',
-                dimensions=(rows, cols),
-                env=env
+            self.process = subprocess.Popen(
+                ['powershell.exe'],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                env=os.environ.copy(),
+                universal_newlines=True,
+                bufsize=1
             )
 
-            # Start reading thread
+            # Start reading threads
             self.running = True
-            self.read_thread = Thread(target=self._read_windows_output)
-            self.read_thread.daemon = True
-            self.read_thread.start()
+            
+            # Thread for stdout
+            self.stdout_thread = Thread(target=self._read_windows_pipe, args=(self.process.stdout,))
+            self.stdout_thread.daemon = True
+            self.stdout_thread.start()
+            
+            # Thread for stderr
+            self.stderr_thread = Thread(target=self._read_windows_pipe, args=(self.process.stderr,))
+            self.stderr_thread.daemon = True
+            self.stderr_thread.start()
 
         except Exception as e:
             print(f"Failed to start Windows terminal: {e}")
             self.cleanup()
 
-    def _read_windows_output(self):
-        """Thread that reads from the terminal and emits output"""
-        read_timeout = 0.1  # 100ms timeout
-        
-        while self.running and self.winpty and self.winpty.isalive():
-            try:
-                # Try to read with timeout
-                data = None
+    def _read_windows_pipe(self, pipe):
+        """Thread that reads from a pipe and emits output"""
+        try:
+            while self.running and self.process and self.process.poll() is None:
                 try:
-                    data = self.winpty.read(timeout=read_timeout)
-                except TimeoutError:
-                    continue
-                
-                if data:
-                    try:
-                        self.socket.emit('terminal_output', data)
-                    except Exception as e:
-                        print(f"Error emitting terminal output: {e}")
-                time.sleep(0.01)  # Small sleep to prevent CPU hogging
-                
-            except EOFError:
-                break
-            except Exception as e:
-                print(f"Error reading from Windows terminal: {e}")
-                time.sleep(0.1)  # Sleep on error to prevent rapid retries
-        
-        self.cleanup()
+                    # Read one line at a time
+                    line = pipe.readline()
+                    if line:
+                        self.socket.emit('terminal_output', line)
+                    else:
+                        time.sleep(0.01)
+                except Exception as e:
+                    print(f"Error reading from pipe: {e}")
+                    time.sleep(0.1)
+        finally:
+            pipe.close()
 
     def write(self, data):
         if self.is_windows:
-            if self.winpty and self.winpty.isalive():
+            if self.process and self.process.poll() is None:
                 try:
-                    self.winpty.write(data)
+                    self.process.stdin.write(data)
+                    self.process.stdin.flush()
                 except Exception as e:
                     print(f"Failed to write to Windows terminal: {e}")
         else:
@@ -103,30 +101,28 @@ class TerminalManager:
                     print(f"Failed to write to terminal: {e}")
 
     def resize_terminal(self, cols, rows):
-        if self.is_windows:
-            if self.winpty and self.winpty.isalive():
-                try:
-                    self.winpty.setwinsize(rows, cols)
-                except Exception as e:
-                    print(f"Failed to resize Windows terminal: {e}")
-        else:
-            if self.fd is not None:
-                try:
-                    size = struct.pack('HHHH', rows, cols, 0, 0)
-                    fcntl.ioctl(self.fd, termios.TIOCSWINSZ, size)
-                except Exception as e:
-                    print(f"Failed to resize terminal: {e}")
+        # Windows doesn't support resizing through subprocess
+        if not self.is_windows and self.fd is not None:
+            try:
+                size = struct.pack('HHHH', rows, cols, 0, 0)
+                fcntl.ioctl(self.fd, termios.TIOCSWINSZ, size)
+            except Exception as e:
+                print(f"Failed to resize terminal: {e}")
 
     def cleanup(self):
         self.running = False
         
         if self.is_windows:
-            if self.winpty:
+            if self.process:
                 try:
-                    self.winpty.terminate(force=True)
+                    self.process.terminate()
+                    self.process.wait(timeout=1)
                 except:
-                    pass
-                self.winpty = None
+                    try:
+                        self.process.kill()
+                    except:
+                        pass
+                self.process = None
         else:
             if self.pid:
                 try:
