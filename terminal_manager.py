@@ -7,6 +7,7 @@ import subprocess
 import threading
 import queue
 from threading import Thread
+import time
 
 # Import platform-specific modules
 if platform.system() != 'Windows':
@@ -40,11 +41,9 @@ class TerminalManager:
                 ['cmd.exe'],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,
                 startupinfo=startupinfo,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-                universal_newlines=False,
-                shell=False,
                 bufsize=0
             )
 
@@ -92,7 +91,8 @@ class TerminalManager:
     def _read_windows_output(self):
         try:
             while self.running and self.process:
-                output = self.process.stdout.read1(1024)
+                # Read from stdout and stderr
+                output = self.process.stdout.read(1024)
                 if output:
                     try:
                         # Try to decode with different encodings for Windows
@@ -103,8 +103,23 @@ class TerminalManager:
                         self.socket.emit('terminal_output', decoded)
                     except Exception as e:
                         print(f"Error decoding output: {e}")
-                elif self.process.poll() is not None:
+                
+                # Check stderr
+                error = self.process.stderr.read(1024)
+                if error:
+                    try:
+                        decoded = error.decode('utf-8', errors='replace')
+                        self.socket.emit('terminal_output', decoded)
+                    except Exception as e:
+                        print(f"Error decoding stderr: {e}")
+                
+                # Check if process has ended
+                if not output and not error and self.process.poll() is not None:
                     break
+                
+                # Small sleep to prevent CPU hogging
+                time.sleep(0.01)
+                
         except Exception as e:
             print(f"Error reading from Windows terminal: {e}")
         finally:
@@ -136,7 +151,7 @@ class TerminalManager:
                 try:
                     # Ensure proper line endings for Windows
                     data = data.replace('\n', '\r\n')
-                    self.process.stdin.write(data.encode())
+                    self.process.stdin.write(data.encode('cp437'))
                     self.process.stdin.flush()
                 except Exception as e:
                     print(f"Failed to write to Windows terminal: {e}")
