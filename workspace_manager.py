@@ -244,6 +244,13 @@ class WorkspaceManager:
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
 
+        # Delete existing log file if it exists
+        if os.path.exists(log_file):
+            try:
+                os.remove(log_file)
+            except Exception as e:
+                print(f"Failed to delete old log file: {e}")
+
         # Create file handler
         log_file = os.path.join(workspace_root, "workspace_manager.log")
         file_handler = logging.FileHandler(log_file)
