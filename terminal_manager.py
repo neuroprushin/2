@@ -43,8 +43,8 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Start cmd.exe with UTF-8 and virtual terminal sequences enabled
-            self.pty.spawn('cmd.exe /u /k chcp 65001>nul & prompt $P$G')
+            # Start cmd.exe with minimal configuration
+            self.pty.spawn('cmd.exe')
             
             # Start reading thread
             self.running = True
@@ -58,47 +58,22 @@ class TerminalManager:
 
     def _read_windows_output(self):
         """Thread that reads from the terminal and emits output"""
-        output_buffer = io.StringIO()
-        
         while self.running and self.pty:
             try:
                 # Read available data
                 data = self.pty.read()
                 if data:
-                    # Add to buffer
-                    output_buffer.write(data)
-                    
-                    # Get current buffer content
-                    content = output_buffer.getvalue()
-                    
-                    # If we have a complete line or buffer is getting large
-                    if '\n' in content or len(content) > 1024:
-                        # Get the content and clear buffer
-                        output = content
-                        output_buffer = io.StringIO()
-                        
-                        # Clean and emit
-                        cleaned = self._clean_terminal_output(output)
-                        if cleaned:
-                            self.socket.emit('terminal_output', cleaned)
-                            
+                    # Clean and emit immediately
+                    self.socket.emit('terminal_output', data)
                 time.sleep(0.001)  # Tiny sleep to prevent CPU hogging
             except Exception as e:
                 if 'EOF' not in str(e):  # Don't print EOF errors
                     print(f"Error reading from Windows terminal: {e}")
                 time.sleep(0.1)  # Sleep on error to prevent rapid retries
                 if 'EOF' in str(e):
-                    break  # Exit on EOF
+                    break
                 continue
         
-        # Emit any remaining content
-        final_content = output_buffer.getvalue()
-        if final_content:
-            cleaned = self._clean_terminal_output(final_content)
-            if cleaned:
-                self.socket.emit('terminal_output', cleaned)
-        
-        output_buffer.close()
         self.cleanup()
 
     def _clean_terminal_output(self, output):
@@ -131,9 +106,9 @@ class TerminalManager:
         if self.is_windows:
             if self.pty:
                 try:
-                    # Ensure proper line endings for Windows
-                    data = data.replace('\n', '\r\n')
-                    self.pty.write(data)
+                    # Ensure input is processed as a single operation
+                    with threading.Lock():
+                        self.pty.write(data)
                 except Exception as e:
                     print(f"Failed to write to Windows terminal: {e}")
         else:
