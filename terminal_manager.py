@@ -43,14 +43,10 @@ class TerminalManager:
             # Create PTY with dimensions
             self.pty = PTY(rows, cols)
             
-            # Start PowerShell with minimal configuration and set initial window
-            startup_command = (
-                'powershell.exe -NoLogo -NoExit -Command "'
-                '$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(%d, 1000); '
-                '$Host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size(%d, %d); '
-                'Clear-Host"'
-            ) % (cols, cols, rows)
-            
+            # Start cmd.exe with UTF-8 and proper window size
+            # /k keeps the window open after commands
+            # mode CON: sets the console window and buffer size
+            startup_command = f'cmd.exe /k mode CON: COLS={cols} LINES={rows}'
             self.pty.spawn(startup_command)
             
             # Start reading thread
@@ -129,17 +125,9 @@ class TerminalManager:
         if self.is_windows:
             if self.pty:
                 try:
-                    # PowerShell requires buffer width to match window width
-                    # and buffer height must be >= window height
-                    resize_command = (
-                        '$width = %d; $height = %d; '
-                        'if ($Host.UI.RawUI.BufferSize.Width -ne $width) {'
-                        '    $Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size($width, 1000);'
-                        '};'
-                        '$Host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size($width, $height)'
-                    ) % (cols, rows)
-                    
-                    self.pty.write(resize_command + '\r\n')
+                    # Use the mode command to resize the console
+                    resize_command = f'mode CON: COLS={cols} LINES={rows}\r\n'
+                    self.pty.write(resize_command)
                 except Exception as e:
                     print(f"Failed to resize Windows terminal: {e}")
         else:
