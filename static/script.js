@@ -596,6 +596,11 @@ async function selectWorkspace(path) {
                 workspaceTree.innerHTML = '';
                 buildTree(data.structure, workspaceTree);
             }
+
+            // Send terminal command to change directory
+            if (socket) {
+                socket.emit('terminal_input', { data: `cd "${path}"\n` });
+            }
         } else {
             showError('Failed to load workspace structure');
         }
