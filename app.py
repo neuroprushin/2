@@ -9,6 +9,7 @@ import os
 import shutil
 import time
 from datetime import datetime
+from typing import Dict, Optional
 
 import google.generativeai as genai
 from anthropic import Anthropic
@@ -45,6 +46,39 @@ AVAILABLE_MODELS = {
         },
         "max_tokens": 100000,
     },
+    "phi4": {
+        "name": "Phi 4",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "client_class": OpenAI,
+        "base_url": "https://openrouter.ai/api/v1",
+        "models": {
+            "code": "microsoft/phi-4",
+            "chat": "microsoft/phi-4"
+        },
+        "max_tokens": 100000,
+    },
+    "qwen": {
+        "name": "Qwen 2.5 Coder",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "client_class": OpenAI,
+        "base_url": "https://openrouter.ai/api/v1",
+        "models": {
+            "code": "qwen/qwen-2.5-coder-32b-instruct",
+            "chat": "qwen/qwen-2.5-coder-32b-instruct"
+        },
+        "max_tokens": 100000,
+    },
+    "llama": {
+        "name": "Llama 3.3 70B Instruct",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "client_class": OpenAI,
+        "base_url": "https://openrouter.ai/api/v1",
+        "models": {
+            "code": "meta-llama/llama-3.3-70b-instruct",
+            "chat": "meta-llama/llama-3.3-70b-instruct"
+        },
+        "max_tokens": 100000,
+    },
     "gemini": {
         "name": "Gemini 2.0 Flash Experimental",
         "api_key_env": "GOOGLE_API_KEY",
@@ -72,7 +106,7 @@ AVAILABLE_MODELS = {
         "client_class": Anthropic,
         "models": {
             "code": "claude-3-5-sonnet-20241022",
-            "chat": "claude-3-5-sonnet-20241022",
+            "chat": "claude-3-5-sonnet-20241022"
         },
         "max_tokens": 100000,
     },
@@ -724,9 +758,9 @@ def process_prompt():
                         "content"]
 
         # Get suggestions from AI
-        suggestions = get_code_suggestion(prompt,
-                                          files_content,
-                                          model_id=model_id)
+        suggestions = get_code_suggestion(prompt=prompt,
+                                            model_id=model_id,
+                                            files_content=files_content)
 
         if not suggestions or "operations" not in suggestions:
             return (
@@ -1018,10 +1052,8 @@ def get_chat_response(system_message, user_message, model_id):
         if model_id == "o1-mini" or model_id == "o1":
             # For o1 model, combine system message and user message
             messages = [{
-                "role":
-                "user",
-                "content":
-                f"{system_message}\n\nUser request: {user_message}",
+                "role": "user",
+                "content": f"{system_message}\n\nUser request: {user_message}",
             }]
         else:
             messages = [
@@ -1036,8 +1068,7 @@ def get_chat_response(system_message, user_message, model_id):
             ]
 
         # Estimate tokens in messages
-        system_tokens = len(
-            system_message.encode("utf-8")) // 4  # Rough estimate
+        system_tokens = len(system_message.encode("utf-8")) // 4  # Rough estimate
         user_tokens = len(user_message.encode("utf-8")) // 4
         total_tokens = system_tokens + user_tokens
 
@@ -1052,9 +1083,7 @@ def get_chat_response(system_message, user_message, model_id):
                     system_message, max_tokens=available_tokens)
                 # Update truncated message
                 messages[0]["content"] = system_message
-                print(
-                    f"Truncated system message to fit within {available_tokens} tokens"
-                )
+                print(f"Truncated system message to fit within {available_tokens} tokens")
             else:
                 raise Exception("Message too long even after truncation")
 
@@ -1074,10 +1103,8 @@ def get_chat_response(system_message, user_message, model_id):
             response = client.messages.create(
                 model=model_config["models"]["chat"],
                 messages=[{
-                    "role":
-                    "user",
-                    "content":
-                    f"{system_message}\n\nUser request: {user_message}",
+                    "role": "user",
+                    "content": f"{system_message}\n\nUser request: {user_message}",
                 }],
                 temperature=0.7,
                 max_tokens=4096,
@@ -1109,8 +1136,7 @@ def get_chat_response(system_message, user_message, model_id):
 
                 # For chat, just use the text directly
                 text = response.text.strip()
-                print(
-                    f"\nResponse received in {time.time() - start_time:.1f}s")
+                print(f"\nResponse received in {time.time() - start_time:.1f}s")
                 print(f"Response length: {len(text)} characters")
 
             except Exception as e:
@@ -1120,14 +1146,12 @@ def get_chat_response(system_message, user_message, model_id):
                     for i in range(len(messages) - 1):
                         if messages[i]["role"] == "system":
                             messages[i]["content"] = (
-                                workspace_manager.
-                                _truncate_content_for_context(
+                                workspace_manager._truncate_content_for_context(
                                     messages[i]["content"],
                                     max_tokens=10000,  # Even more conservative
                                 ))
                     # Combine truncated messages
-                    full_context = "\n\n".join(msg["content"]
-                                               for msg in messages)
+                    full_context = "\n\n".join(msg["content"] for msg in messages)
                     response = chat.send_message(
                         full_context,
                         generation_config=genai.types.GenerationConfig(
@@ -1136,8 +1160,7 @@ def get_chat_response(system_message, user_message, model_id):
                             max_output_tokens=4096),
                     )
                     if not response or not response.text:
-                        raise Exception(
-                            "Empty response from Gemini after truncation")
+                        raise Exception("Empty response from Gemini after truncation")
                     text = response.text.strip()
                 else:
                     raise
@@ -1181,8 +1204,7 @@ def get_chat_response(system_message, user_message, model_id):
                         socketio.emit(
                             "status",
                             {
-                                "message":
-                                f"Receiving chat response... ({len(text)} characters)",
+                                "message": f"Receiving chat response... ({len(text)} characters)",
                                 "step": 2,
                                 "progress": {
                                     "chunks": chunk_count,
@@ -1195,9 +1217,7 @@ def get_chat_response(system_message, user_message, model_id):
                         last_update = current_time
 
             print(f"\nResponse complete in {time.time() - start_time:.1f}s")
-            print(
-                f"Total response size: {len(text)} characters in {chunk_count} chunks"
-            )
+            print(f"Total response size: {len(text)} characters in {chunk_count} chunks")
 
         print("\n=== Step 3: Formatting Response ===")
         socketio.emit("status", {
@@ -1217,11 +1237,8 @@ def get_chat_response(system_message, user_message, model_id):
                 # Extract language if specified
                 if "\n" in part:
                     lang, code = part.split("\n", 1)
-                    # Remove trailing whitespace and newlines, preserve
-                    # indentation
-                    formatted_code = (code.rstrip().replace("\n",
-                                                            "<br>").replace(
-                                                                " ", "&nbsp;"))
+                    # Remove trailing whitespace and newlines, preserve indentation
+                    formatted_code = (code.rstrip().replace("\n", "<br>").replace(" ", "&nbsp;"))
                     formatted_parts.append(
                         f'<pre><code class="language-{lang.strip()}">{formatted_code}</code></pre>'
                     )
@@ -1559,10 +1576,10 @@ def apply_changes(suggestions, workspace_dir):
         raise Exception(f"Failed to apply changes: {str(e)}")
 
 
-def get_code_suggestion(prompt,
-                        model_id,
-                        files_content=None,
-                        workspace_context=None):
+def get_code_suggestion(prompt: str,
+                       model_id: str,
+                       files_content: Optional[Dict[str, str]] = None,
+                       workspace_context: Optional[str] = None) -> Dict:
     """Get code suggestions from the selected AI model"""
     if model_id not in model_clients:
         raise Exception(
@@ -1624,7 +1641,7 @@ def get_code_suggestion(prompt,
                 "role":
                 "user",
                 "content":
-                f'{prompt}\n\nIMPORTANT: Your response MUST be a valid JSON object following this exact structure:\n{{\n    "explanation": "Brief explanation of what you will do",\n    "operations": [\n        {{\n            "type": "edit_file",\n            "path": "relative/path",\n            "changes": [\n                {{\n                    "old": "text to replace",\n                    "new": "replacement text"\n                }}\n            ]\n        }}\n    ]\n}}',
+                f'{prompt}\n\nIMPORTANT: Your response MUST be a valid JSON object following this exact structure:\n{{\n    "explanation": "Brief explanation of what you will do",\n    "operations": [\n        {{\n            "type": "edit_file",\n            "path": "relative/path",\n            "changes": [\n                {{\n                    "old": "text to replace",\n                    "new": "replacement text"\n                }}\n            ]\n        }}\n    ]\n}}'
             })
 
         # Estimate total tokens
@@ -1636,12 +1653,12 @@ def get_code_suggestion(prompt,
         if total_tokens > max_tokens:
             # Keep prompt intact, truncate context
             available_tokens = (max_tokens -
-                                (len(prompt.encode("utf-8")) // 4) - 1000
-                                )  # Leave buffer
+                              (len(prompt.encode("utf-8")) // 4) - 1000
+                              )  # Leave buffer
             if available_tokens > 0:
                 # Truncate each system message proportionally
                 for i in range(len(messages) -
-                               1):  # Skip the last message (user prompt)
+                             1):  # Skip the last message (user prompt)
                     if messages[i]["role"] == "system":
                         messages[i]["content"] = (
                             workspace_manager._truncate_content_for_context(
@@ -1660,21 +1677,50 @@ def get_code_suggestion(prompt,
 
         if model_id == "claude":
             # Use Anthropic's client interface
-            full_context = "\n\n".join(msg["content"] for msg in messages)
             response = client.messages.create(
                 model=model_config["models"]["code"],
                 messages=[{
-                    "role":
-                    "user",
-                    "content":
-                    f"{full_context}\n\nPlease provide your response in valid JSON format following the structure specified above.",
+                    "role": "user",
+                    "content": "\n\n".join(messages[-1]["content"].split("\n\nUser request:")),
                 }],
                 temperature=0.1,
                 max_tokens=4096,
             )
+            if not response or not response.content:
+                raise Exception("Empty response from Claude")
+            
             full_text = response.content[0].text
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
             print(f"Response length: {len(full_text)} characters")
+            
+            # Try to extract JSON from Claude's response
+            # First try to find JSON between code blocks
+            if "```json" in full_text and "```" in full_text:
+                json_block = full_text.split("```json")[-1].split("```")[0].strip()
+                try:
+                    result = json.loads(json_block)
+                    if isinstance(result, dict) and "operations" in result:
+                        return result
+                except json.JSONDecodeError:
+                    pass  # Fall through to other parsing attempts
+            
+            # If that fails, try to find JSON content directly
+            json_start = full_text.find("{")
+            json_end = full_text.rfind("}")
+            
+            if json_start != -1 and json_end != -1 and json_start < json_end:
+                try:
+                    json_text = full_text[json_start:json_end + 1]
+                    # Clean up the JSON text
+                    json_text = json_text.replace('\n', ' ').replace('\r', ' ')
+                    json_text = ' '.join(json_text.split())  # Normalize whitespace
+                    result = json.loads(json_text)
+                    if isinstance(result, dict) and "operations" in result:
+                        return result
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Could not parse JSON from Claude's response: {str(e)}")
+            
+            raise ValueError("Could not find valid JSON in Claude's response")
         elif model_id == "gemini":
             # Use the Google AI client
             try:
@@ -1714,7 +1760,7 @@ def get_code_suggestion(prompt,
                                 ))
                     # Combine truncated messages
                     full_context = "\n\n".join(msg["content"]
-                                               for msg in messages)
+                                             for msg in messages)
                     response = chat.send_message(
                         full_context,
                         generation_config=genai.types.GenerationConfig(
@@ -1728,12 +1774,22 @@ def get_code_suggestion(prompt,
                     full_text = response.text.strip()
                 else:
                     raise
+        elif model_config["client_class"] == "ollama":
+            response = client.generate(
+                model=model_config["models"]["code"],
+                prompt=messages[-1]["content"],  # Use the last message (user prompt)
+                system=messages[0]["content"] if len(messages) > 1 else None
+            )
+            if isinstance(response, dict):
+                full_text = response.get('response', '')
+            else:
+                full_text = str(response) if response is not None else ""
         else:
             # Use streaming for other OpenAI-compatible models
             response = client.chat.completions.create(
                 model=model_config["models"]["code"],
                 messages=messages,
-                temperature=1 if model_id in ["o1", "o1-mini"] else 0.1,
+                temperature=1 if model_id in ["o1-mini", "o1"] else 0.1,
                 stream=True,
             )
 
@@ -1793,10 +1849,8 @@ def get_code_suggestion(prompt,
         # code blocks
         if cleaned_text.startswith("```") and cleaned_text.endswith("```"):
             # Remove the code block markers and any language identifier
-            cleaned_text = (cleaned_text.split("\n", 1)[1]
-                            if "\n" in cleaned_text else cleaned_text)
-            cleaned_text = (cleaned_text.rsplit("\n", 1)[0]
-                            if "\n" in cleaned_text else cleaned_text)
+            cleaned_text = cleaned_text.split("\n", 1)[1] if "\n" in cleaned_text else cleaned_text
+            cleaned_text = cleaned_text.rsplit("\n", 1)[0] if "\n" in cleaned_text else cleaned_text
             cleaned_text = cleaned_text.strip("`").strip()
             if cleaned_text.startswith("json"):
                 cleaned_text = cleaned_text[4:].strip()
@@ -1809,63 +1863,37 @@ def get_code_suggestion(prompt,
             try:
                 # Extract the JSON part
                 json_text = cleaned_text[json_start:json_end + 1]
+                print("\nJSON Response:", json_text)  # Debug print
 
-                # Preprocess the JSON text to handle triple quotes
-                def preprocess_json(text):
-                    # Split the text into parts by finding all occurrences of
-                    # triple quotes
-                    parts = []
-                    last_pos = 0
-                    pos = text.find('"""')
-
-                    while pos != -1:
-                        # Add the text before the triple quotes
-                        parts.append(text[last_pos:pos])
-
-                        # Find the closing triple quotes
-                        end_pos = text.find('"""', pos + 3)
-                        if end_pos == -1:
-                            # If no closing quotes found, treat the rest as
-                            # normal text
-                            parts.append(text[pos:])
-                            break
-
-                        # Get the content between triple quotes and escape it
-                        content = text[pos + 3:end_pos]
-                        escaped_content = content.replace('"', '\\"').replace(
-                            "\n", "\\n")
-                        parts.append(f'"{escaped_content}"')
-
-                        last_pos = end_pos + 3
-                        pos = text.find('"""', last_pos)
-
-                    # Add any remaining text
-                    if last_pos < len(text):
-                        parts.append(text[last_pos:])
-
-                    # Join parts and normalize quotes
-                    result = "".join(parts)
-                    # Replace curly quotes with straight quotes
-                    result = result.replace('"', '"').replace('"', '"')
-                    return result
-
-                # Preprocess the JSON text and parse it
-                processed_json = preprocess_json(json_text)
-                result = json.loads(processed_json)
+                try:
+                    # First try parsing as is
+                    result = json.loads(json_text)
+                except json.JSONDecodeError as e1:
+                    print(f"Initial JSON parse failed: {str(e1)}")
+                    # Try cleaning up common issues
+                    json_text = json_text.replace('\n', '\\n')
+                    json_text = json_text.replace('\r', '\\r')
+                    json_text = json_text.replace('\t', '\\t')
+                    # Replace any remaining control characters
+                    json_text = "".join(ch for ch in json_text if ord(ch) >= 32)
+                    
+                    try:
+                        result = json.loads(json_text)
+                    except json.JSONDecodeError as e2:
+                        print(f"Second JSON parse attempt failed: {str(e2)}")
+                        raise ValueError(f"Could not parse JSON response: {str(e2)}")
 
                 if isinstance(result, dict) and "operations" in result:
                     return result
 
-            except json.JSONDecodeError as e:
-                print(f"JSON decode error: {str(e)}")
-                print(f"JSON text: {json_text}")
-                print(f"Processed JSON: {processed_json}")
+            except Exception as e:
+                print(f"JSON processing error: {str(e)}")
+                print(f"Problematic JSON text: {json_text}")
                 raise ValueError(
                     f"Invalid JSON format: {str(e)}. Please try again with a clearer prompt."
                 )
 
-        print(
-            f"Could not find valid JSON in response: {cleaned_text[:200]}...")
+        print(f"Could not find valid JSON in response: {cleaned_text[:200]}...")
         raise ValueError(
             "Could not get a valid JSON response. Please try again with a clearer prompt."
         )
@@ -2142,4 +2170,4 @@ def get_operation_diff(operation, workspace_dir):
 
 if __name__ == "__main__":
     # Run with eventlet server
-    socketio.run(app, debug=False, host="0.0.0.0", port=5000)
+    socketio.run(app, debug=True, host="0.0.0.0", port=5000)

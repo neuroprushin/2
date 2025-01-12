@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.15] - 2024-01-16
+
+### Added
+- New AI models through OpenRouter:
+  - DeepSeek V3 (OpenRouter): Alternative routing for improved reliability
+  - Phi 4: Microsoft's latest code-specialized model
+  - Re-added: Qwen 2.5 Coder: Alibaba's 32B parameter coding model
+  - Re-added: Llama 3.3 70B Instruct: Meta's latest instruction-tuned model
+
+### Fixed
+- JSON response parsing for code suggestions
+- Model response handling and error recovery
+- System message formatting for different models
+- Temperature parameter handling for specialized models
+- Context length management for large files
+
+### Enhanced
+- Model selection interface for new models
+- Response streaming optimization
+- Error handling and recovery mechanisms
+- Model-specific parameter validation
+
 ## [0.0.14] - 2024-01-15
 
 ### Added
