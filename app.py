@@ -1052,10 +1052,8 @@ def get_chat_response(system_message, user_message, model_id):
         if model_id == "o1-mini" or model_id == "o1":
             # For o1 model, combine system message and user message
             messages = [{
-                "role":
-                "user",
-                "content":
-                f"{system_message}\n\nUser request: {user_message}",
+                "role": "user",
+                "content": f"{system_message}\n\nUser request: {user_message}",
             }]
         else:
             messages = [
@@ -1070,8 +1068,7 @@ def get_chat_response(system_message, user_message, model_id):
             ]
 
         # Estimate tokens in messages
-        system_tokens = len(
-            system_message.encode("utf-8")) // 4  # Rough estimate
+        system_tokens = len(system_message.encode("utf-8")) // 4  # Rough estimate
         user_tokens = len(user_message.encode("utf-8")) // 4
         total_tokens = system_tokens + user_tokens
 
@@ -1086,9 +1083,7 @@ def get_chat_response(system_message, user_message, model_id):
                     system_message, max_tokens=available_tokens)
                 # Update truncated message
                 messages[0]["content"] = system_message
-                print(
-                    f"Truncated system message to fit within {available_tokens} tokens"
-                )
+                print(f"Truncated system message to fit within {available_tokens} tokens")
             else:
                 raise Exception("Message too long even after truncation")
 
@@ -1108,10 +1103,8 @@ def get_chat_response(system_message, user_message, model_id):
             response = client.messages.create(
                 model=model_config["models"]["chat"],
                 messages=[{
-                    "role":
-                    "user",
-                    "content":
-                    f"{system_message}\n\nUser request: {user_message}",
+                    "role": "user",
+                    "content": f"{system_message}\n\nUser request: {user_message}",
                 }],
                 temperature=0.7,
                 max_tokens=4096,
@@ -1143,8 +1136,7 @@ def get_chat_response(system_message, user_message, model_id):
 
                 # For chat, just use the text directly
                 text = response.text.strip()
-                print(
-                    f"\nResponse received in {time.time() - start_time:.1f}s")
+                print(f"\nResponse received in {time.time() - start_time:.1f}s")
                 print(f"Response length: {len(text)} characters")
 
             except Exception as e:
@@ -1154,14 +1146,12 @@ def get_chat_response(system_message, user_message, model_id):
                     for i in range(len(messages) - 1):
                         if messages[i]["role"] == "system":
                             messages[i]["content"] = (
-                                workspace_manager.
-                                _truncate_content_for_context(
+                                workspace_manager._truncate_content_for_context(
                                     messages[i]["content"],
                                     max_tokens=10000,  # Even more conservative
                                 ))
                     # Combine truncated messages
-                    full_context = "\n\n".join(msg["content"]
-                                               for msg in messages)
+                    full_context = "\n\n".join(msg["content"] for msg in messages)
                     response = chat.send_message(
                         full_context,
                         generation_config=genai.types.GenerationConfig(
@@ -1170,8 +1160,7 @@ def get_chat_response(system_message, user_message, model_id):
                             max_output_tokens=4096),
                     )
                     if not response or not response.text:
-                        raise Exception(
-                            "Empty response from Gemini after truncation")
+                        raise Exception("Empty response from Gemini after truncation")
                     text = response.text.strip()
                 else:
                     raise
@@ -1215,8 +1204,7 @@ def get_chat_response(system_message, user_message, model_id):
                         socketio.emit(
                             "status",
                             {
-                                "message":
-                                f"Receiving chat response... ({len(text)} characters)",
+                                "message": f"Receiving chat response... ({len(text)} characters)",
                                 "step": 2,
                                 "progress": {
                                     "chunks": chunk_count,
@@ -1229,9 +1217,7 @@ def get_chat_response(system_message, user_message, model_id):
                         last_update = current_time
 
             print(f"\nResponse complete in {time.time() - start_time:.1f}s")
-            print(
-                f"Total response size: {len(text)} characters in {chunk_count} chunks"
-            )
+            print(f"Total response size: {len(text)} characters in {chunk_count} chunks")
 
         print("\n=== Step 3: Formatting Response ===")
         socketio.emit("status", {
@@ -1251,11 +1237,8 @@ def get_chat_response(system_message, user_message, model_id):
                 # Extract language if specified
                 if "\n" in part:
                     lang, code = part.split("\n", 1)
-                    # Remove trailing whitespace and newlines, preserve
-                    # indentation
-                    formatted_code = (code.rstrip().replace("\n",
-                                                            "<br>").replace(
-                                                                " ", "&nbsp;"))
+                    # Remove trailing whitespace and newlines, preserve indentation
+                    formatted_code = (code.rstrip().replace("\n", "<br>").replace(" ", "&nbsp;"))
                     formatted_parts.append(
                         f'<pre><code class="language-{lang.strip()}">{formatted_code}</code></pre>'
                     )
@@ -1697,17 +1680,47 @@ def get_code_suggestion(prompt: str,
             response = client.messages.create(
                 model=model_config["models"]["code"],
                 messages=[{
-                    "role":
-                    "user",
-                    "content":
-                    f"{system_prompt}\n\n{prompt}\n\nPlease provide your response in valid JSON format following the structure specified above.",
+                    "role": "user",
+                    "content": "\n\n".join(messages[-1]["content"].split("\n\nUser request:")),
                 }],
                 temperature=0.1,
                 max_tokens=4096,
             )
+            if not response or not response.content:
+                raise Exception("Empty response from Claude")
+            
             full_text = response.content[0].text
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
             print(f"Response length: {len(full_text)} characters")
+            
+            # Try to extract JSON from Claude's response
+            # First try to find JSON between code blocks
+            if "```json" in full_text and "```" in full_text:
+                json_block = full_text.split("```json")[-1].split("```")[0].strip()
+                try:
+                    result = json.loads(json_block)
+                    if isinstance(result, dict) and "operations" in result:
+                        return result
+                except json.JSONDecodeError:
+                    pass  # Fall through to other parsing attempts
+            
+            # If that fails, try to find JSON content directly
+            json_start = full_text.find("{")
+            json_end = full_text.rfind("}")
+            
+            if json_start != -1 and json_end != -1 and json_start < json_end:
+                try:
+                    json_text = full_text[json_start:json_end + 1]
+                    # Clean up the JSON text
+                    json_text = json_text.replace('\n', ' ').replace('\r', ' ')
+                    json_text = ' '.join(json_text.split())  # Normalize whitespace
+                    result = json.loads(json_text)
+                    if isinstance(result, dict) and "operations" in result:
+                        return result
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Could not parse JSON from Claude's response: {str(e)}")
+            
+            raise ValueError("Could not find valid JSON in Claude's response")
         elif model_id == "gemini":
             # Use the Google AI client
             try:
