@@ -6,6 +6,7 @@ eventlet.monkey_patch()
 
 import json
 import os
+import re
 import shutil
 import time
 from datetime import datetime
@@ -1871,17 +1872,52 @@ def get_code_suggestion(prompt: str,
                 except json.JSONDecodeError as e1:
                     print(f"Initial JSON parse failed: {str(e1)}")
                     # Try cleaning up common issues
-                    json_text = json_text.replace('\n', '\\n')
-                    json_text = json_text.replace('\r', '\\r')
-                    json_text = json_text.replace('\t', '\\t')
-                    # Replace any remaining control characters
-                    json_text = "".join(ch for ch in json_text if ord(ch) >= 32)
+                    json_text = json_text.replace('\n', ' ')
+                    json_text = json_text.replace('\r', ' ')
+                    json_text = json_text.replace('\t', ' ')
+                    
+                    # Basic fixes for all models
+                    json_text = json_text.replace("'", '"')  # Fix single quotes
+                    json_text = "".join(ch for ch in json_text if ord(ch) >= 32)  # Remove control chars
+                    json_text = ' '.join(json_text.split())  # Normalize whitespace
                     
                     try:
                         result = json.loads(json_text)
                     except json.JSONDecodeError as e2:
                         print(f"Second JSON parse attempt failed: {str(e2)}")
-                        raise ValueError(f"Could not parse JSON response: {str(e2)}")
+                        
+                        # Apply aggressive fixes only for Llama model
+                        if model_id == "llama":
+                            try:
+                                # Fix unquoted property names
+                                json_text = re.sub(r'([{,])\s*(\w+):', r'\1"\2":', json_text)
+                                
+                                # Fix missing commas between objects in arrays
+                                json_text = re.sub(r'}\s*{', '},{', json_text)
+                                
+                                # Fix trailing/missing commas in arrays/objects
+                                json_text = re.sub(r',\s*([}\]])', r'\1', json_text)  # Remove trailing commas
+                                json_text = re.sub(r'([}\]])\s*([{\[])', r'\1,\2', json_text)  # Add missing commas
+                                
+                                # Fix missing quotes around values
+                                json_text = re.sub(r':\s*([^"\d\[\]{},\s][^,\[\]{}]*?)([,}])', r':"\1"\2', json_text)
+                                
+                                # Fix missing quotes in array values
+                                json_text = re.sub(r'\[\s*([^"\d\[\]{},\s][^,\[\]{}]*?)([,\]])', r'["\1"\2', json_text)
+                                json_text = re.sub(r'([,\[])\s*([^"\d\[\]{},\s][^,\[\]{}]*?)([,\]])', r'\1"\2"\3', json_text)
+                                
+                                # Fix any remaining delimiter issues
+                                json_text = re.sub(r',\s*,', ',', json_text)  # Remove duplicate commas
+                                json_text = re.sub(r'{\s*,', '{', json_text)  # Remove leading commas in objects
+                                json_text = re.sub(r'\[\s*,', '[', json_text)  # Remove leading commas in arrays
+                                
+                                print(f"Attempting final parse with text: {json_text}")  # Debug print
+                                result = json.loads(json_text)
+                            except json.JSONDecodeError as e3:
+                                print(f"Third JSON parse attempt failed: {str(e3)}")
+                                raise ValueError(f"Could not parse JSON response: {str(e3)}")
+                        else:
+                            raise ValueError(f"Could not parse JSON response: {str(e2)}")
 
                 if isinstance(result, dict) and "operations" in result:
                     return result
