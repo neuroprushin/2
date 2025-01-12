@@ -1001,7 +1001,7 @@ Please provide helpful responses about the code and files in this workspace."""
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-def get_chat_response(system_message, user_message, model_id="deepseek"):
+def get_chat_response(system_message, user_message, model_id):
     """Get a chat response from the selected AI model"""
     if model_id not in model_clients:
         raise Exception(
@@ -1560,9 +1560,9 @@ def apply_changes(suggestions, workspace_dir):
 
 
 def get_code_suggestion(prompt,
+                        model_id,
                         files_content=None,
-                        workspace_context=None,
-                        model_id="deepseek"):
+                        workspace_context=None):
     """Get code suggestions from the selected AI model"""
     if model_id not in model_clients:
         raise Exception(

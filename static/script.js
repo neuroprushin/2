@@ -1,6 +1,6 @@
 // Global Variables
 let currentWorkspace = null;
-let currentModel = 'deepseek';
+let currentModel = null;
 let pendingChanges = null;
 let socket = null;
 let expandedDirs = new Map(); // Track expanded directories and their pagination state
@@ -1523,7 +1523,7 @@ function appendOperation(container, operation) {
 
 function getOperationIcon(type) {
     const icons = {
-        'create_file': 'fa-file-plus text-green-500',
+        'create_file': 'fa-solid fa-file-circle-plus text-green-500',
         'edit_file': 'fa-file-edit text-blue-500',
         'remove_file': 'fa-trash text-red-500'
     };
