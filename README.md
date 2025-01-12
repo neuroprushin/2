@@ -17,6 +17,10 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 
 - **Multi-Model Support**: Choose between different AI models for your coding needs:
   - DeepSeek V3
+  - DeepSeek V3 (OpenRouter)
+  - Phi 4
+  - Qwen 2.5 Coder
+  - Llama 3.3 70B Instruct
   - Gemini 2.0 Flash Experimental
   - Grok 2
   - Claude 3.5 Sonnet
@@ -114,6 +118,10 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 ## Model Capabilities
 
 - **DeepSeek Coder V3**: Specialized in code generation and modification
+- **DeepSeek V3 (OpenRouter)**: Alternative routing for DeepSeek through OpenRouter
+- **Phi 4**: Microsoft's latest code-specialized model
+- **Qwen 2.5 Coder**: Alibaba's specialized coding model with 32B parameters
+- **Llama 3.3 70B Instruct**: Meta's latest instruction-tuned large language model
 - **Gemini 2.0 Pro**: Advanced code generation and natural language understanding
 - **Grok 2**: Advanced language model for code and natural language
 - **Claude 3.5 Sonnet**: Advanced reasoning and code understanding
