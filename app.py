@@ -1775,16 +1775,6 @@ def get_code_suggestion(prompt: str,
                     full_text = response.text.strip()
                 else:
                     raise
-        elif model_config["client_class"] == "ollama":
-            response = client.generate(
-                model=model_config["models"]["code"],
-                prompt=messages[-1]["content"],  # Use the last message (user prompt)
-                system=messages[0]["content"] if len(messages) > 1 else None
-            )
-            if isinstance(response, dict):
-                full_text = response.get('response', '')
-            else:
-                full_text = str(response) if response is not None else ""
         else:
             # Use streaming for other OpenAI-compatible models
             response = client.chat.completions.create(
@@ -1867,57 +1857,25 @@ def get_code_suggestion(prompt: str,
                 print("\nJSON Response:", json_text)  # Debug print
 
                 try:
-                    # First try parsing as is
+                    # First try: direct JSON parse
                     result = json.loads(json_text)
                 except json.JSONDecodeError as e1:
-                    print(f"Initial JSON parse failed: {str(e1)}")
-                    # Try cleaning up common issues
-                    json_text = json_text.replace('\n', ' ')
-                    json_text = json_text.replace('\r', ' ')
-                    json_text = json_text.replace('\t', ' ')
-                    
-                    # Basic fixes for all models
-                    json_text = json_text.replace("'", '"')  # Fix single quotes
-                    json_text = "".join(ch for ch in json_text if ord(ch) >= 32)  # Remove control chars
-                    json_text = ' '.join(json_text.split())  # Normalize whitespace
-                    
+                    print(f"First JSON parse attempt failed: {str(e1)}")
                     try:
-                        result = json.loads(json_text)
+                        # Second try: clean the text and parse
+                        cleaned_text = clean_json_text(json_text)
+                        result = json.loads(cleaned_text)
                     except json.JSONDecodeError as e2:
                         print(f"Second JSON parse attempt failed: {str(e2)}")
-                        
-                        # Apply aggressive fixes only for Llama model
-                        if model_id == "llama":
-                            try:
-                                # Fix unquoted property names
-                                json_text = re.sub(r'([{,])\s*(\w+):', r'\1"\2":', json_text)
-                                
-                                # Fix missing commas between objects in arrays
-                                json_text = re.sub(r'}\s*{', '},{', json_text)
-                                
-                                # Fix trailing/missing commas in arrays/objects
-                                json_text = re.sub(r',\s*([}\]])', r'\1', json_text)  # Remove trailing commas
-                                json_text = re.sub(r'([}\]])\s*([{\[])', r'\1,\2', json_text)  # Add missing commas
-                                
-                                # Fix missing quotes around values
-                                json_text = re.sub(r':\s*([^"\d\[\]{},\s][^,\[\]{}]*?)([,}])', r':"\1"\2', json_text)
-                                
-                                # Fix missing quotes in array values
-                                json_text = re.sub(r'\[\s*([^"\d\[\]{},\s][^,\[\]{}]*?)([,\]])', r'["\1"\2', json_text)
-                                json_text = re.sub(r'([,\[])\s*([^"\d\[\]{},\s][^,\[\]{}]*?)([,\]])', r'\1"\2"\3', json_text)
-                                
-                                # Fix any remaining delimiter issues
-                                json_text = re.sub(r',\s*,', ',', json_text)  # Remove duplicate commas
-                                json_text = re.sub(r'{\s*,', '{', json_text)  # Remove leading commas in objects
-                                json_text = re.sub(r'\[\s*,', '[', json_text)  # Remove leading commas in arrays
-                                
-                                print(f"Attempting final parse with text: {json_text}")  # Debug print
-                                result = json.loads(json_text)
-                            except json.JSONDecodeError as e3:
-                                print(f"Third JSON parse attempt failed: {str(e3)}")
-                                raise ValueError(f"Could not parse JSON response: {str(e3)}")
-                        else:
-                            raise ValueError(f"Could not parse JSON response: {str(e2)}")
+                        try:
+                            # Third try: more aggressive cleaning
+                            cleaned_text = re.sub(r'[^\x20-\x7E]', '', cleaned_text)  # Remove non-printable chars
+                            result = json.loads(cleaned_text)
+                        except json.JSONDecodeError as e3:
+                            print(f"Third JSON parse attempt failed: {str(e3)}")
+                            print(f"Original text: {json_text[:200]}...")
+                            print(f"Cleaned text: {cleaned_text[:200]}...")
+                            raise ValueError(f"Could not parse JSON response after cleaning. Original error: {str(e1)}")
 
                 if isinstance(result, dict) and "operations" in result:
                     return result
@@ -2202,6 +2160,30 @@ def get_operation_diff(operation, workspace_dir):
             "new_content": "",
             "diff": f"Error generating diff: {str(e)}",
         }
+
+
+def clean_json_text(text: str) -> str:
+    """Clean and normalize JSON text from model responses."""
+    # Replace smart quotes with regular quotes
+    text = text.replace('"', '"').replace('"', '"')
+    text = text.replace(''', "'").replace(''', "'")
+    
+    # Remove any leading/trailing whitespace
+    text = text.strip()
+    
+    # Find the first { and last } to extract just the JSON object
+    start = text.find('{')
+    end = text.rfind('}') + 1
+    if start >= 0 and end > start:
+        text = text[start:end]
+    
+    # Fix common JSON formatting issues
+    text = re.sub(r'}\s*{', '},{', text)  # Fix adjacent objects
+    text = re.sub(r'"\s*:\s*"([^"]*?)\s*([,}])', r'": "\1"\2', text)  # Fix missing quotes after values
+    text = re.sub(r'"\s*:\s*([^"][^,}]*?)([,}])', r'": \1\2', text)  # Fix non-quoted values
+    text = re.sub(r',(\s*})', r'\1', text)  # Remove trailing commas
+    
+    return text
 
 
 if __name__ == "__main__":
