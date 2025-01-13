@@ -45,6 +45,17 @@ AVAILABLE_MODELS = {
         },
         "max_tokens": 100000,
     },
+    "codestral": {
+        "name": "Codestral",
+        "api_key_env": "CODESTRAL_API_KEY",
+        "client_class": OpenAI,
+        "base_url": "https://codestral.mistral.ai/v1",
+        "models": {
+            "code": "codestral-latest",
+            "chat": "codestral-latest"
+        },
+        "max_tokens": 100000,
+    },
     "gemini": {
         "name": "Gemini 2.0 Flash Experimental",
         "api_key_env": "GOOGLE_API_KEY",

@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.0.15] - 2024-01-13
+
+### Added
+- New model integration:
+  - Codestral: High-performance code generation model with Mamba architecture
+  - Enhanced model compatibility and configuration
+  - Optimized streaming responses for Codestral
+
+### Changed
+- Updated model selection interface to include Codestral
+- Enhanced model configuration options
+- Improved error handling for model responses
+
+### Fixed
+- Model selection and configuration handling
+- API key validation for Codestral model
+- Documentation consistency
+
 All notable changes to this project will be documented in this file.
 
 ## [0.0.14] - 2024-01-15

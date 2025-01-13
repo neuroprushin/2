@@ -17,6 +17,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 
 - **Multi-Model Support**: Choose between different AI models for your coding needs:
   - DeepSeek V3
+  - Codestral
   - Gemini 2.0 Flash Experimental
   - Grok 2
   - Claude 3.5 Sonnet
@@ -93,6 +94,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 3. Set up your environment variables in `.env`:
    ```
    DEEPSEEK_API_KEY=your_deepseek_api_key
+   CODESTRAL_API_KEY=your_codestral_api_key
    OPENROUTER_API_KEY=your_openrouter_api_key
    GOOGLE_API_KEY=your_google_api_key
    GROK_API_KEY=your_grok_api_key
@@ -122,6 +124,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 - **GPT-4o**: Optimized GPT-4 variant with enhanced code understanding
 - **o1-mini**: Experimental model with specialized capabilities and unique instruction handling
 - **o1-preview**: Experimental model with specialized capabilities and unique instruction handling
+- **Codestral**: High-performance code generation model with Mamba architecture
 
 ## Contributing
 
