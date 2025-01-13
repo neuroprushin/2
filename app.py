@@ -724,9 +724,10 @@ def process_prompt():
                         "content"]
 
         # Get suggestions from AI
-        suggestions = get_code_suggestion(prompt,
-                                          files_content,
-                                          model_id=model_id)
+        suggestions = get_code_suggestion(prompt=prompt,
+                                       files_content=files_content,
+                                       model_id=model_id,
+                                       workspace_context=None)
 
         if not suggestions or "operations" not in suggestions:
             return (
@@ -1462,19 +1463,11 @@ def apply_changes(suggestions, workspace_dir):
                     # Apply the changes
                     new_content = content
                     for change in operation["changes"]:
-                        if (len(change["old"].splitlines()) == 1
-                                and not any(c in change["old"]
-                                            for c in "{}()[]")
-                                and not change["old"].strip().startswith(
-                                    ("def ", "class ", "import ", "from "))):
-                            new_content = new_content.replace(
-                                change["old"], change["new"])
-                        else:
-                            pos = new_content.find(change["old"])
-                            if pos != -1:
-                                new_content = (
-                                    new_content[:pos] + change["new"] +
-                                    new_content[pos + len(change["old"]):])
+                        if "old" in change and "new" in change:
+                            new_content = new_content.replace(change["old"],
+                                                              change["new"])
+                    # Store the new content in the operation
+                    operation["content"] = new_content
 
                     # Write the updated content
                     with open(file_path, "w", encoding="utf-8") as f:
@@ -1560,8 +1553,8 @@ def apply_changes(suggestions, workspace_dir):
 
 
 def get_code_suggestion(prompt,
-                        model_id,
                         files_content=None,
+                        model_id=None,
                         workspace_context=None):
     """Get code suggestions from the selected AI model"""
     if model_id not in model_clients:
@@ -1980,9 +1973,9 @@ def list_available_folders():
                                     sum(
                                         os.path.getsize(
                                             os.path.join(dirpath, filename))
-                                        for dirpath, dirnames, filenames in
-                                        os.walk(full_path)
-                                        for filename in filenames),
+                                            for dirpath, dirnames, filenames in
+                                            os.walk(full_path)
+                                            for filename in filenames),
                                     "files":
                                     sum(
                                         len(files)
@@ -2108,7 +2101,7 @@ def get_operation_diff(operation, workspace_dir):
             for change in operation.get("changes", []):
                 if "old" in change and "new" in change:
                     new_content = new_content.replace(change["old"],
-                                                      change["new"])
+                                                              change["new"])
             # Store the new content in the operation
             operation["content"] = new_content
 
@@ -2142,4 +2135,4 @@ def get_operation_diff(operation, workspace_dir):
 
 if __name__ == "__main__":
     # Run with eventlet server
-    socketio.run(app, debug=False, host="0.0.0.0", port=5000)
+    socketio.run(app, debug=True, host="0.0.0.0", port=5000)
