@@ -116,6 +116,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 ## Model Capabilities
 
 - **DeepSeek Coder V3**: Specialized in code generation and modification
+- **Codestral**: High-performance code generation model
 - **Gemini 2.0 Pro**: Advanced code generation and natural language understanding
 - **Grok 2**: Advanced language model for code and natural language
 - **Claude 3.5 Sonnet**: Advanced reasoning and code understanding
@@ -124,7 +125,6 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 - **GPT-4o**: Optimized GPT-4 variant with enhanced code understanding
 - **o1-mini**: Experimental model with specialized capabilities and unique instruction handling
 - **o1-preview**: Experimental model with specialized capabilities and unique instruction handling
-- **Codestral**: High-performance code generation model with Mamba architecture
 
 ## Contributing
 
