@@ -16,6 +16,7 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
   - Native shell integration (cmd.exe on Windows, bash on Linux)
 
 - **Multi-Model Support**: Choose between different AI models for your coding needs:
+  - DeepSeek R1
   - DeepSeek V3
   - Codestral
   - Gemini 2.0 Flash Experimental
@@ -115,7 +116,8 @@ J.A.R.V.I.S. is an intelligent coding assistant that leverages multiple state-of
 
 ## Model Capabilities
 
-- **DeepSeek Coder V3**: Specialized in code generation and modification
+- **DeepSeek R1**: Latest DeepSeek model with enhanced code understanding and generation
+- **DeepSeek V3**: Specialized in code generation and modification
 - **Codestral**: High-performance code generation model
 - **Gemini 2.0 Pro**: Advanced code generation and natural language understanding
 - **Grok 2**: Advanced language model for code and natural language

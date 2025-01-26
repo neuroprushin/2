@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.0.16] - 2024-01-14
+
+### Added
+- New model integration:
+  - DeepSeek R1: Latest DeepSeek model with enhanced code understanding and generation capabilities
+  - Improved model selection interface to include DeepSeek R1
+  - Updated model configuration settings
+
+### Changed
+- Updated model selection interface to include DeepSeek R1
+- Enhanced model configuration options for DeepSeek R1
+- Improved documentation to reflect new model capabilities
+
 ## [0.0.15] - 2024-01-13
 
 ### Added
