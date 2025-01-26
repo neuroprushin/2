@@ -23,6 +23,17 @@ from workspace_manager import WorkspaceManager
 
 # Model configurations
 AVAILABLE_MODELS = {
+    "deepseek-r1": {
+        "name": "DeepSeek R1",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "client_class": OpenAI,
+        "base_url": "https://api.deepseek.com",
+        "models": {
+            "code": "deepseek-reasoner",
+            "chat": "deepseek-reasoner"
+        },
+        "max_tokens": 100000,
+    },
     "deepseek": {
         "name": "DeepSeek V3",
         "api_key_env": "DEEPSEEK_API_KEY",
@@ -2146,4 +2157,4 @@ def get_operation_diff(operation, workspace_dir):
 
 if __name__ == "__main__":
     # Run with eventlet server
-    socketio.run(app, debug=True, host="0.0.0.0", port=5000)
+    socketio.run(app, debug=False, host="0.0.0.0", port=5000)
