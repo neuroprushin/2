@@ -233,32 +233,61 @@ class WorkspaceManager:
     }
 
     def __init__(self, workspace_root: str):
-        """Initialize workspace manager with enhanced features"""
         self.workspace_root = workspace_root
         os.makedirs(workspace_root, exist_ok=True)
 
-        # Initialize enhanced logging
         self.logger = logging.getLogger("WorkspaceManager")
         self.logger.setLevel(logging.DEBUG)
 
-        # Setup console handler
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
-        console_format = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s")
+        console_format = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         console_handler.setFormatter(console_format)
         self.logger.addHandler(console_handler)
 
-        # Setup file handler
         try:
-            log_file = os.path.join(workspace_root, "workspace_manager.log")
-            if os.path.exists(log_file):
-                try:
-                    os.remove(log_file)
-                except Exception as e:
-                    print(f"Failed to delete old log file: {e}")
+            base_log_path = os.path.join(workspace_root, "workspace_manager.log")
+            base, ext = os.path.splitext(base_log_path)
 
-            file_handler = logging.FileHandler(log_file)
+            def try_remove(log_file: str) -> Tuple[bool, str]:
+                try:
+                    if os.path.exists(log_file):
+                        for handler in self.logger.handlers[:]:
+                            handler.close()
+                            self.logger.removeHandler(handler)
+                        os.remove(log_file)
+                    return True, log_file
+                except PermissionError:
+                    return False, log_file
+
+            chosen_log_file = None
+            attempts = 0
+            max_attempts = 50
+            BATCH_SIZE = 5
+
+            while attempts < max_attempts and not chosen_log_file:
+                batch = []
+                for i in range(BATCH_SIZE):
+                    candidate = (
+                        f"{base}_{attempts + i}{ext}"
+                        if (attempts + i) > 0
+                        else f"{base}{ext}"
+                    )
+                    batch.append(candidate)
+
+                self.logger.debug(f"Trying log file names batch: {batch}")
+                with ThreadPoolExecutor(max_workers=BATCH_SIZE) as executor:
+                    results = list(executor.map(try_remove, batch))
+                for success, candidate in results:
+                    if success:
+                        chosen_log_file = candidate
+                        break
+                attempts += BATCH_SIZE
+
+            if not chosen_log_file:
+                raise Exception("Failed to find the log file for writing due to permission issues.")
+
+            file_handler = logging.FileHandler(chosen_log_file)
             file_handler.setLevel(logging.DEBUG)
             file_format = logging.Formatter(
                 "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s"
@@ -268,8 +297,7 @@ class WorkspaceManager:
         except Exception as e:
             print(f"Failed to setup file logging: {e}")
 
-        self.logger.info(
-            f"Initializing WorkspaceManager with root: {workspace_root}")
+        self.logger.info(f"Initializing WorkspaceManager with root: {workspace_root}")
 
         # Initialize BM25 search
         self.search_index = BM25Search()
