@@ -82,8 +82,8 @@ AVAILABLE_MODELS = {
         "api_key_env": "GOOGLE_API_KEY",
         "client_class": "genai",
         "models": {
-            "code": "gemini-1.5-pro",
-            "chat": "gemini-1.5-pro"
+            "code": "gemini-1.5-pro-002",
+            "chat": "gemini-1.5-pro-002"
         },
         "max_tokens": 30000,
     },
@@ -1178,11 +1178,12 @@ def get_chat_response(system_message, user_message, model_id):
             # Use the Google AI client
             try:
                 model = client.GenerativeModel("gemini-1.5-pro")
+                chat = model.start_chat(history=[])
 
                 # Combine all messages into a single context
                 full_context = "\n\n".join(msg["content"] for msg in messages)
 
-                response = model.generate_content(
+                response = chat.send_message(
                     full_context,
                     generation_config=genai.types.GenerationConfig(
                         temperature=0.1,
@@ -1810,11 +1811,12 @@ def get_code_suggestion(prompt,
             # Use the Google AI client
             try:
                 model = client.GenerativeModel("gemini-1.5-pro")
+                chat = model.start_chat(history=[])
 
                 # Combine all messages into a single context
                 full_context = "\n\n".join(msg["content"] for msg in messages)
 
-                response = model.generate_content(
+                response = chat.send_message(
                     full_context,
                     generation_config=genai.types.GenerationConfig(
                         temperature=0.1,
@@ -1826,10 +1828,10 @@ def get_code_suggestion(prompt,
                     raise Exception("Empty response from Gemini")
 
                 # For chat, just use the text directly
-                text = response.text.strip()
+                full_text = response.text.strip()
                 print(
                     f"\nResponse received in {time.time() - start_time:.1f}s")
-                print(f"Response length: {len(text)} characters")
+                print(f"Response length: {len(full_text)} characters")
 
             except Exception as e:
                 error_msg = str(e)
