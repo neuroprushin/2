@@ -67,13 +67,23 @@ AVAILABLE_MODELS = {
         },
         "max_tokens": 100000,
     },
-    "gemini": {
+    "gemini-2.0-flash": {
         "name": "Gemini 2.0 Flash Experimental",
         "api_key_env": "GOOGLE_API_KEY",
         "client_class": "genai",
         "models": {
             "code": "gemini-2.0-flash-exp",
             "chat": "gemini-2.0-flash-exp"
+        },
+        "max_tokens": 30000,
+    },
+    "gemini-1.5-pro": {
+        "name": "Gemini-1.5-Pro",
+        "api_key_env": "GOOGLE_API_KEY",
+        "client_class": "genai",
+        "models": {
+            "code": "gemini-1.5-pro",
+            "chat": "gemini-1.5-pro"
         },
         "max_tokens": 30000,
     },
@@ -1110,7 +1120,7 @@ def get_chat_response(system_message, user_message, model_id):
             text = response.content[0].text
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
             print(f"Response length: {len(text)} characters")
-        elif model_id == "gemini":
+        elif model_id == "gemini-2.0-flash":
             # Use the Google AI client
             try:
                 model = client.GenerativeModel("gemini-2.0-flash-exp")
@@ -1120,6 +1130,59 @@ def get_chat_response(system_message, user_message, model_id):
                 full_context = "\n\n".join(msg["content"] for msg in messages)
 
                 response = chat.send_message(
+                    full_context,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.1,
+                        candidate_count=1,
+                        max_output_tokens=8192),
+                )
+
+                if not response or not response.text:
+                    raise Exception("Empty response from Gemini")
+
+                # For chat, just use the text directly
+                text = response.text.strip()
+                print(
+                    f"\nResponse received in {time.time() - start_time:.1f}s")
+                print(f"Response length: {len(text)} characters")
+
+            except Exception as e:
+                error_msg = str(e)
+                if "maximum context length" in error_msg.lower():
+                    # Try again with more aggressive truncation
+                    for i in range(len(messages) - 1):
+                        if messages[i]["role"] == "system":
+                            messages[i]["content"] = (
+                                workspace_manager.
+                                _truncate_content_for_context(
+                                    messages[i]["content"],
+                                    max_tokens=10000,  # Even more conservative
+                                ))
+                    # Combine truncated messages
+                    full_context = "\n\n".join(msg["content"]
+                                               for msg in messages)
+                    response = chat.send_message(
+                        full_context,
+                        generation_config=genai.types.GenerationConfig(
+                            temperature=0.1,
+                            candidate_count=1,
+                            max_output_tokens=4096),
+                    )
+                    if not response or not response.text:
+                        raise Exception(
+                            "Empty response from Gemini after truncation")
+                    text = response.text.strip()
+                else:
+                    raise
+        elif model_id == "gemini-1.5-pro":
+            # Use the Google AI client
+            try:
+                model = client.GenerativeModel("gemini-1.5-pro")
+
+                # Combine all messages into a single context
+                full_context = "\n\n".join(msg["content"] for msg in messages)
+
+                response = model.generate_content(
                     full_context,
                     generation_config=genai.types.GenerationConfig(
                         temperature=0.1,
@@ -1690,7 +1753,7 @@ def get_code_suggestion(prompt,
             full_text = response.content[0].text
             print(f"\nResponse received in {time.time() - start_time:.1f}s")
             print(f"Response length: {len(full_text)} characters")
-        elif model_id == "gemini":
+        elif model_id == "gemini-2.0-flash":
             # Use the Google AI client
             try:
                 model = client.GenerativeModel("gemini-2.0-flash-exp")
@@ -1741,6 +1804,59 @@ def get_code_suggestion(prompt,
                         raise Exception(
                             "Empty response from Gemini after truncation")
                     full_text = response.text.strip()
+                else:
+                    raise
+        elif model_id == "gemini-1.5-pro":
+            # Use the Google AI client
+            try:
+                model = client.GenerativeModel("gemini-1.5-pro")
+
+                # Combine all messages into a single context
+                full_context = "\n\n".join(msg["content"] for msg in messages)
+
+                response = model.generate_content(
+                    full_context,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.1,
+                        candidate_count=1,
+                        max_output_tokens=8192),
+                )
+
+                if not response or not response.text:
+                    raise Exception("Empty response from Gemini")
+
+                # For chat, just use the text directly
+                text = response.text.strip()
+                print(
+                    f"\nResponse received in {time.time() - start_time:.1f}s")
+                print(f"Response length: {len(text)} characters")
+
+            except Exception as e:
+                error_msg = str(e)
+                if "maximum context length" in error_msg.lower():
+                    # Try again with more aggressive truncation
+                    for i in range(len(messages) - 1):
+                        if messages[i]["role"] == "system":
+                            messages[i]["content"] = (
+                                workspace_manager.
+                                _truncate_content_for_context(
+                                    messages[i]["content"],
+                                    max_tokens=10000,  # Even more conservative
+                                ))
+                    # Combine truncated messages
+                    full_context = "\n\n".join(msg["content"]
+                                               for msg in messages)
+                    response = chat.send_message(
+                        full_context,
+                        generation_config=genai.types.GenerationConfig(
+                            temperature=0.1,
+                            candidate_count=1,
+                            max_output_tokens=4096),
+                    )
+                    if not response or not response.text:
+                        raise Exception(
+                            "Empty response from Gemini after truncation")
+                    text = response.text.strip()
                 else:
                     raise
         else:
